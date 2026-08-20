@@ -10,16 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Debug Environment
-        run: |
-          pip install --upgrade buildozer
-          ls -la
-          buildozer --version
-      
       - name: Build APK
-        run: |
-          export ALLOW_ROOT=1
-          yes | buildozer -v --log-level 2 android debug
+        run: buildozer -v android debug
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
