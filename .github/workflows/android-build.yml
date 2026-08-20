@@ -28,8 +28,10 @@ jobs:
 
       - name: Install Python build tools
         run: |
-          pip install --upgrade pip
-          pip install --upgrade buildozer Cython==0.29.36 kivy
+          pip install --upgrade "pip<24.1"
+          pip install --upgrade "setuptools<70.0" wheel
+          pip install --upgrade "Cython<3.0"
+          pip install --upgrade buildozer git+https://github.com/kivy/python-for-android.git
 
       - name: Build with Buildozer
         run: |
