@@ -4,14 +4,14 @@ package.name = hermestexteditor
 package.domain = com.nousresearch.hermes
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 0.1
+version = 0.3
 
 requirements = python3,kivy,pyjnius
 
 orientation = portrait
 fullscreen = 0
 
-android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
+android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
 android.api = 34
 android.minapi = 21
