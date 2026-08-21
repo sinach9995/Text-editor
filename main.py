@@ -71,20 +71,127 @@ class HermesEditor(BoxLayout):
         bottom_wrapper.add_widget(actions_bar)
         self.add_widget(bottom_wrapper)
 
+        if platform == 'android':
+            from android import activity
+            activity.bind(on_activity_result=self.on_android_activity_result)
+            activity.bind(on_new_intent=self.on_new_intent)
+            self.check_intent()
+
     def new_file(self):
         self.text_area.text = ''
         self.current_uri = None
+        self.current_filename = 'untitled.txt'
         self.status_label.text = 'untitled.txt'
 
+    def check_intent(self):
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            current_intent = PythonActivity.mActivity.getIntent()
+            if current_intent:
+                self.process_intent(current_intent)
+        except Exception as e:
+            print(f'Error checking startup intent: {e}')
+
+    def on_new_intent(self, intent):
+        self.process_intent(intent)
+
+    def process_intent(self, intent):
+        try:
+            from jnius import autoclass
+            Intent = autoclass('android.content.Intent')
+            action = intent.getAction()
+            if action in [Intent.ACTION_VIEW, Intent.ACTION_EDIT]:
+                uri = intent.getData()
+                if uri:
+                    self.load_uri_content(uri)
+        except Exception as e:
+            print(f'Error processing intent: {e}')
+
     def open_system_file_picker(self):
-        # Native SAF Intent would be triggered here
-        pass
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                Intent = autoclass('android.content.Intent')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                intent.setType('text/*')
+                PythonActivity.mActivity.startActivityForResult(intent, 1001)
+            except Exception as e:
+                print(f'Could not open file picker: {e}')
+        else:
+            self.status_label.text = 'Open picker simulated on desktop'
 
     def save_system_file_picker(self):
-        pass
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                Intent = autoclass('android.content.Intent')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                intent.setType('text/plain')
+                intent.putExtra(Intent.EXTRA_TITLE, self.current_filename)
+                PythonActivity.mActivity.startActivityForResult(intent, 1002)
+            except Exception as e:
+                print(f'Could not open save picker: {e}')
+        else:
+            self.status_label.text = 'Save picker simulated on desktop'
+
+    @mainthread
+    def on_android_activity_result(self, request_code, result_code, intent):
+        if result_code != -1 or intent is None:
+            return
+        uri = intent.getData()
+        if uri is None:
+            return
+        if request_code == 1001:
+            self.load_uri_content(uri)
+        elif request_code == 1002:
+            self.save_uri_content(uri)
+
+    def load_uri_content(self, uri):
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            content_resolver = activity.getContentResolver()
+            input_stream = content_resolver.openInputStream(uri)
+            BufferedReader = autoclass('java.io.BufferedReader')
+            InputStreamReader = autoclass('java.io.InputStreamReader')
+            reader = BufferedReader(InputStreamReader(input_stream, 'UTF-8'))
+            lines = []
+            line = reader.readLine()
+            while line is not None:
+                lines.append(line)
+                line = reader.readLine()
+            reader.close()
+            self.text_area.text = '\n'.join(lines)
+            self.current_uri = uri
+            self.status_label.text = 'Opened file successfully'
+        except Exception as e:
+            self.status_label.text = f'Error reading: {e}'
+
+    def save_uri_content(self, uri):
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            content_resolver = activity.getContentResolver()
+            output_stream = content_resolver.openOutputStream(uri)
+            text_bytes = self.text_area.text.encode('utf-8')
+            output_stream.write(text_bytes)
+            output_stream.flush()
+            output_stream.close()
+            self.current_uri = uri
+            self.status_label.text = 'Saved successfully'
+        except Exception as e:
+            self.status_label.text = f'Error saving: {e}'
 
 class MainApp(App):
     def build(self):
+        self.title = 'Hermes Text Editor'
         return HermesEditor()
 
 if __name__ == '__main__':
