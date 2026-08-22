@@ -12,7 +12,6 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.utils import platform
 from kivy.core.window import Window
 from kivy.clock import Clock, mainthread
-from kivy.storage.jsonstore import JsonStorage
 
 THEMES = {
     'dark': {
@@ -52,26 +51,41 @@ class RoundedButton(Button):
 class HermesEditor(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation='vertical', **kwargs)
-        self.store = JsonStorage(os.path.join(App.get_running_app().user_data_dir, 'settings.json'))
-        self.current_theme = self.store.get('theme')['type'] if self.store.exists('theme') else 'dark'
+        self.current_theme = 'dark'
         self.current_uri = None
-        self.cache_path = os.path.join(App.get_running_app().user_data_dir, '.cache.txt')
         
+        # Safely handle user_data_dir
+        try:
+            app = App.get_running_app()
+            if app and app.user_data_dir:
+                os.makedirs(app.user_data_dir, exist_ok=True)
+                self.cache_path = os.path.join(app.user_data_dir, '.cache.txt')
+            else:
+                self.cache_path = '.cache.txt'
+        except:
+            self.cache_path = '.cache.txt'
+
         self.build_ui()
         self.apply_theme(self.current_theme)
         
         if platform == 'android':
-            from android import activity
+            Clock.schedule_once(self.init_android, 1)
+
+        self.load_cache()
+        Clock.schedule_interval(self.save_cache, 10)
+
+    def init_android(self, dt):
+        try:
             from android.permissions import request_permissions, Permission
             request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+            from android import activity
             activity.bind(on_activity_result=self.on_android_activity_result)
             activity.bind(on_new_intent=self.on_new_intent)
             Window.bind(on_keyboard_height=self.on_keyboard_height)
             Window.bind(on_request_close=self.on_back_pressed)
             self.check_intent()
-        
-        self.load_cache()
-        Clock.schedule_interval(self.save_cache, 10)
+        except Exception as e:
+            print(f"Android init error: {e}")
 
     def build_ui(self):
         self.clear_widgets()
@@ -80,7 +94,11 @@ class HermesEditor(BoxLayout):
 
         # Header
         self.header = BoxLayout(size_hint_y=None, height='64dp', padding=['16dp', '8dp'], spacing='12dp')
-        icon = Image(source='assets/icon.png', size_hint=(None, None), size=('36dp', '36dp'))
+        try:
+            icon = Image(source='assets/icon.png', size_hint=(None, None), size=('36dp', '36dp'))
+            self.header.add_widget(icon)
+        except:
+            pass
         
         title_box = BoxLayout(orientation='vertical')
         self.lbl_title = Label(text="Hermes Editor", color=t['text'], font_size='18sp', bold=True, halign='left')
@@ -92,7 +110,7 @@ class HermesEditor(BoxLayout):
         btn_menu = Button(text="⋮", size_hint=(None, 1), width='48dp', background_normal='', background_color=(0,0,0,0), color=t['text'], font_size='24sp', bold=True)
         btn_menu.bind(on_release=self.open_menu)
         
-        self.header.add_widget(icon); self.header.add_widget(title_box); self.header.add_widget(btn_menu)
+        self.header.add_widget(title_box); self.header.add_widget(btn_menu)
         self.add_widget(self.header)
 
         # Input
@@ -131,7 +149,6 @@ class HermesEditor(BoxLayout):
         self.btn_open.bg_color = t['accent']
         self.btn_save.bg_color = t['accent']
         Window.clearcolor = t['bg']
-        self.store.put('theme', type=theme_name)
 
     def open_menu(self, btn):
         menu = DropDown()
@@ -146,9 +163,9 @@ class HermesEditor(BoxLayout):
     def show_about(self):
         t = THEMES[self.current_theme]
         content = BoxLayout(orientation='vertical', padding='20dp', spacing='10dp')
-        content.add_widget(Label(text="Hermes Text Editor v0.7", bold=True, color=t['text']))
+        content.add_widget(Label(text="Hermes Text Editor v0.8", bold=True, color=t['text']))
         content.add_widget(Label(text="Developers:\nSina Chaghimirza & Hermes Agent", halign='center', color=t['muted']))
-        content.add_widget(Label(text="Instant Start / No-Loader Edition", halign='center', color=t['muted']))
+        content.add_widget(Label(text="Stable Build / Crash-free", halign='center', color=t['muted']))
         btn_close = RoundedButton(text="Close", size_hint=(1, None), height='45dp', bg_color=t['accent'])
         content.add_widget(btn_close)
         popup = Popup(title='About', content=content, size_hint=(0.8, 0.4), background_color=t['bg'], title_color=t['text'])
@@ -165,7 +182,7 @@ class HermesEditor(BoxLayout):
 
     def save_cache(self, *args):
         try:
-            with open(self.cache_path, 'w', encoding='utf-8') as f: f.write(self.text_area.text)
+            with open(self.cache_path, 'w', encoding='utf-8') as f: f.write(self.text_angle if hasattr(self, 'text_area') else '')
         except: pass
 
     def load_cache(self):
@@ -179,18 +196,30 @@ class HermesEditor(BoxLayout):
 
     def open_system_picker(self):
         if platform == 'android':
-            from jnius import autoclass
-            Intent = autoclass('android.content.Intent'); PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            intent = Intent(Intent.ACTION_OPEN_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("text/*")
-            PythonActivity.mActivity.startActivityForResult(intent, 1001)
+            try:
+                from jnius import autoclass
+                Intent = autoclass('android.content.Intent')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                intent.setType("text/*")
+                PythonActivity.mActivity.startActivityForResult(intent, 1001)
+            except Exception as e:
+                self.lbl_status.text = f"Picker error: {e}"
 
     def save_system_picker(self):
         if platform == 'android':
-            from jnius import autoclass
-            Intent = autoclass('android.content.Intent'); PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            intent = Intent(Intent.ACTION_CREATE_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("text/plain")
-            intent.putExtra(Intent.EXTRA_TITLE, "document.txt")
-            PythonActivity.mActivity.startActivityForResult(intent, 1002)
+            try:
+                from jnius import autoclass
+                Intent = autoclass('android.content.Intent')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                intent.setType("text/plain")
+                intent.putExtra(Intent.EXTRA_TITLE, "document.txt")
+                PythonActivity.mActivity.startActivityForResult(intent, 1002)
+            except Exception as e:
+                self.lbl_status.text = f"Picker error: {e}"
 
     @mainthread
     def on_android_activity_result(self, request_code, result_code, intent):
@@ -201,8 +230,8 @@ class HermesEditor(BoxLayout):
 
     def on_new_intent(self, intent): self.process_intent(intent)
     def check_intent(self):
-        from jnius import autoclass
         try:
+            from jnius import autoclass
             intent = autoclass('org.kivy.android.PythonActivity').mActivity.getIntent()
             if intent: self.process_intent(intent)
         except: pass
@@ -228,12 +257,21 @@ class HermesEditor(BoxLayout):
             stream = activity.getContentResolver().openOutputStream(uri)
             stream.write(self.text_area.text.encode('utf-8')); stream.close()
             self.current_uri = uri; self.lbl_status.text = "Saved"
-        except Exception as e: self.lbl_status.text = f"Error: {e}"
+        except Exception as e: self.lbl_status.Number = f"Error: {e}"
+
+    def save_cache(self, *args):
+        try:
+            if hasattr(self, 'text_area'):
+                with open(self.cache_path, 'w', encoding='utf-8') as f:
+                    f.write(self.text_area.text)
+        except:
+            pass
 
 class MainApp(App):
     def build(self):
         self.title = "Hermes Text Editor"
-        Window.softinput_mode = "resize"
+        if platform == 'android':
+            Window.softinput_mode = "resize"
         return HermesEditor()
 
 if __name__ == '__main__':
