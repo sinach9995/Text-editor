@@ -4,7 +4,7 @@ package.name = hermestexteditor
 package.domain = com.nousresearch.hermes
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 0.6
+version = 0.7
 requirements = python3,kivy,pyjnius,pillow
 orientation = portrait
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
@@ -16,8 +16,6 @@ android.debuggable = 0
 android.release = 1
 android.skip_update_check = 1
 android.accept_sdk_license = 1
-android.show_loading = 0
-android.meta_data = pyo.show_loading=0
 icon.filename = assets/icon.png
 icon.compile = 1
 p4a.branch = master

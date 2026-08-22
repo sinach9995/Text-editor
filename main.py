@@ -146,7 +146,7 @@ class HermesEditor(BoxLayout):
     def show_about(self):
         t = THEMES[self.current_theme]
         content = BoxLayout(orientation='vertical', padding='20dp', spacing='10dp')
-        content.add_widget(Label(text="Hermes Text Editor v0.6", bold=True, color=t['text']))
+        content.add_widget(Label(text="Hermes Text Editor v0.7", bold=True, color=t['text']))
         content.add_widget(Label(text="Developers:\nSina Chaghimirza & Hermes Agent", halign='center', color=t['muted']))
         content.add_widget(Label(text="Instant Start / No-Loader Edition", halign='center', color=t['muted']))
         btn_close = RoundedButton(text="Close", size_hint=(1, None), height='45dp', bg_color=t['accent'])
