@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v4
@@ -26,10 +26,11 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y libtinfo5 libncurses5-dev libncursesw5-dev
-        pip install --upgrade pip setuptools<70.0 Cython<3.0 buildozer
+        pip install --upgrade "pip<24.1" "setuptools<70.0" "Cython<3.0" buildozer
 
     - name: Build with Buildozer
       run: |
+        export CFLAGS="-Wno-error=implicit-function-declaration"
         yes | buildozer android debug
       env:
         ALLOW_ROOT: 1
