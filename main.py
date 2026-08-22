@@ -14,7 +14,6 @@ from kivy.core.window import Window
 from kivy.clock import Clock, mainthread
 from kivy.storage.jsonstore import JsonStorage
 
-# Theme Definitions
 THEMES = {
     'dark': {
         'bg': (0.07, 0.08, 0.1, 1),
@@ -50,29 +49,6 @@ class RoundedButton(Button):
             Color(*self.bg_color)
             RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
 
-class SplashScreen(BoxLayout):
-    def __init__(self, on_complete, **kwargs):
-        super().__init__(orientation='vertical', **kwargs)
-        self.on_complete = on_complete
-        t = THEMES['dark']
-        Window.clearcolor = t['bg']
-        
-        # Brand logo
-        self.logo = Image(
-            source='assets/presplash.png',
-            size_hint=(1, 1),
-            keep_ratio=True,
-            allow_stretch=False
-        )
-        self.add_widget(self.logo)
-        
-        # Schedule transition after UI is ready
-        Clock.schedule_once(self.transition, 1.5)
-
-    def transition(self, dt):
-        if self.on_complete:
-            self.on_complete()
-
 class HermesEditor(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation='vertical', **kwargs)
@@ -81,11 +57,9 @@ class HermesEditor(BoxLayout):
         self.current_uri = None
         self.cache_path = os.path.join(App.get_running_app().user_data_dir, '.cache.txt')
         
-        # Build UI immediately
         self.build_ui()
         self.apply_theme(self.current_theme)
         
-        # Lifecycle
         if platform == 'android':
             from android import activity
             from android.permissions import request_permissions, Permission
@@ -96,7 +70,6 @@ class HermesEditor(BoxLayout):
             Window.bind(on_request_close=self.on_back_pressed)
             self.check_intent()
         
-        # Load Cache
         self.load_cache()
         Clock.schedule_interval(self.save_cache, 10)
 
@@ -105,7 +78,7 @@ class HermesEditor(BoxLayout):
         t = THEMES[self.current_theme]
         Window.clearcolor = t['bg']
 
-        # 1. Harmonious Header
+        # Header
         self.header = BoxLayout(size_hint_y=None, height='64dp', padding=['16dp', '8dp'], spacing='12dp')
         icon = Image(source='assets/icon.png', size_hint=(None, None), size=('36dp', '36dp'))
         
@@ -114,19 +87,15 @@ class HermesEditor(BoxLayout):
         self.lbl_title.bind(size=self.lbl_title.setter('text_size'))
         self.lbl_status = Label(text="untitled.txt", color=t['muted'], font_size='12sp', halign='left')
         self.lbl_status.bind(size=self.lbl_status.setter('text_size'))
-        title_box.add_widget(self.lbl_title)
-        title_box.add_widget(self.lbl_status)
+        title_box.add_widget(self.lbl_title); title_box.add_widget(self.lbl_status)
         
-        # Menu Button (Dots)
         btn_menu = Button(text="⋮", size_hint=(None, 1), width='48dp', background_normal='', background_color=(0,0,0,0), color=t['text'], font_size='24sp', bold=True)
         btn_menu.bind(on_release=self.open_menu)
         
-        self.header.add_widget(icon)
-        self.header.add_widget(title_box)
-        self.header.add_widget(btn_menu)
+        self.header.add_widget(icon); self.header.add_widget(title_box); self.header.add_widget(btn_menu)
         self.add_widget(self.header)
 
-        # 2. Input Area
+        # Input
         self.text_area = TextInput(
             text="", multiline=True, background_normal='', background_active='',
             foreground_color=t['text'], cursor_color=t['accent'], font_size='16sp',
@@ -134,22 +103,18 @@ class HermesEditor(BoxLayout):
         )
         self.add_widget(self.text_area)
 
-        # 3. Bottom Action Bar (1/4 area)
+        # Bottom Bar
         self.footer_wrapper = AnchorLayout(anchor_x='center', anchor_y='center', size_hint_y=None, height='120dp', padding=['20dp', '20dp'])
         self.actions_bar = BoxLayout(spacing='15dp', size_hint=(1, None), height='50dp')
         
         self.btn_new = RoundedButton(text="New", bg_color=t['card'], color=t['text'], font_size='15sp', bold=True)
         self.btn_new.bind(on_release=lambda x: self.new_file())
-        
         self.btn_open = RoundedButton(text="Open", bg_color=t['accent'], color=(1,1,1,1), font_size='15sp', bold=True)
         self.btn_open.bind(on_release=lambda x: self.open_system_picker())
-        
         self.btn_save = RoundedButton(text="Save", bg_color=t['accent'], color=(1,1,1,1), font_size='15sp', bold=True)
         self.btn_save.bind(on_release=lambda x: self.save_system_picker())
 
-        self.actions_bar.add_widget(self.btn_new)
-        self.actions_bar.add_widget(self.btn_open)
-        self.actions_bar.add_widget(self.btn_save)
+        self.actions_bar.add_widget(self.btn_new); self.actions_bar.add_widget(self.btn_open); self.actions_bar.add_widget(self.btn_save)
         self.footer_wrapper.add_widget(self.actions_bar)
         self.add_widget(self.footer_wrapper)
 
@@ -171,79 +136,59 @@ class HermesEditor(BoxLayout):
     def open_menu(self, btn):
         menu = DropDown()
         t = THEMES[self.current_theme]
-        
         lbl = "Switch to Light" if self.current_theme == 'dark' else "Switch to Dark"
         btn_theme = Button(text=lbl, size_hint_y=None, height='50dp', background_normal='', background_color=t['card'], color=t['text'])
         btn_theme.bind(on_release=lambda x: [self.apply_theme('light' if self.current_theme == 'dark' else 'dark'), menu.dismiss()])
-        
         btn_about = Button(text="About", size_hint_y=None, height='50dp', background_normal='', background_color=t['card'], color=t['text'])
         btn_about.bind(on_release=lambda x: [self.show_about(), menu.dismiss()])
-        
-        menu.add_widget(btn_theme)
-        menu.add_widget(btn_about)
-        menu.open(btn)
+        menu.add_widget(btn_theme); menu.add_widget(btn_about); menu.open(btn)
 
     def show_about(self):
         t = THEMES[self.current_theme]
         content = BoxLayout(orientation='vertical', padding='20dp', spacing='10dp')
-        content.add_widget(Label(text="Hermes Text Editor v0.5", bold=True, color=t['text']))
+        content.add_widget(Label(text="Hermes Text Editor v0.6", bold=True, color=t['text']))
         content.add_widget(Label(text="Developers:\nSina Chaghimirza & Hermes Agent", halign='center', color=t['muted']))
-        content.add_widget(Label(text="Fixed splash crash & enhanced theming", halign='center', color=t['muted']))
+        content.add_widget(Label(text="Instant Start / No-Loader Edition", halign='center', color=t['muted']))
         btn_close = RoundedButton(text="Close", size_hint=(1, None), height='45dp', bg_color=t['accent'])
         content.add_widget(btn_close)
-        
         popup = Popup(title='About', content=content, size_hint=(0.8, 0.4), background_color=t['bg'], title_color=t['text'])
-        btn_close.bind(on_release=popup.dismiss)
-        popup.open()
+        btn_close.bind(on_release=popup.dismiss); popup.open()
 
     def on_keyboard_height(self, window, height):
         if height > 0:
-            self.footer_wrapper.height = '60dp'
-            self.footer_wrapper.padding = ['10dp', '5dp']
+            self.footer_wrapper.height = '60dp'; self.footer_wrapper.padding = ['10dp', '5dp']
         else:
-            self.footer_wrapper.height = '120dp'
-            self.footer_wrapper.padding = ['20dp', '20dp']
+            self.footer_wrapper.height = '120dp'; self.footer_wrapper.padding = ['20dp', '20dp']
 
     def on_back_pressed(self, *args):
-        self.save_cache()
-        return False
+        self.save_cache(); return False
 
     def save_cache(self, *args):
         try:
-            with open(self.cache_path, 'w', encoding='utf-8') as f:
-                f.write(self.text_area.text)
+            with open(self.cache_path, 'w', encoding='utf-8') as f: f.write(self.text_area.text)
         except: pass
 
     def load_cache(self):
         if os.path.exists(self.cache_path) and not self.current_uri:
             try:
-                with open(self.cache_path, 'r', encoding='utf-8') as f:
-                    self.text_area.text = f.read()
+                with open(self.cache_path, 'r', encoding='utf-8') as f: self.text_area.text = f.read()
             except: pass
 
     def new_file(self):
-        self.text_area.text = ""
-        self.current_uri = None
-        self.lbl_status.text = "untitled.txt"
+        self.text_area.text = ""; self.current_uri = None; self.lbl_status.text = "untitled.txt"
 
     def open_system_picker(self):
         if platform == 'android':
             from jnius import autoclass
-            Intent = autoclass('android.content.Intent')
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-            intent.addCategory(Intent.CATEGORY_OPENABLE)
-            intent.setType("text/*")
+            Intent = autoclass('android.content.Intent'); PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("text/*")
             PythonActivity.mActivity.startActivityForResult(intent, 1001)
 
     def save_system_picker(self):
         if platform == 'android':
             from jnius import autoclass
-            Intent = autoclass('android.content.Intent')
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-            intent.addCategory(Intent.CATEGORY_OPENABLE)
-            intent.setType("text/plain")
+            Intent = autoclass('android.content.Intent'); PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            intent = Intent(Intent.ACTION_CREATE_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("text/plain")
             intent.putExtra(Intent.EXTRA_TITLE, "document.txt")
             PythonActivity.mActivity.startActivityForResult(intent, 1002)
 
@@ -257,8 +202,10 @@ class HermesEditor(BoxLayout):
     def on_new_intent(self, intent): self.process_intent(intent)
     def check_intent(self):
         from jnius import autoclass
-        intent = autoclass('org.kivy.android.PythonActivity').mActivity.getIntent()
-        if intent: self.process_intent(intent)
+        try:
+            intent = autoclass('org.kivy.android.PythonActivity').mActivity.getIntent()
+            if intent: self.process_intent(intent)
+        except: pass
 
     def process_intent(self, intent):
         if intent.getAction() in ["android.intent.action.VIEW", "android.intent.action.EDIT"]:
@@ -271,9 +218,7 @@ class HermesEditor(BoxLayout):
             activity = autoclass('org.kivy.android.PythonActivity').mActivity
             stream = activity.getContentResolver().openInputStream(uri)
             bytes_data = stream.readAllBytes() if hasattr(stream, 'readAllBytes') else stream.read()
-            self.text_area.text = bytes_data.decode('utf-8')
-            self.current_uri = uri
-            self.lbl_status.text = "File opened"
+            self.text_area.text = bytes_data.decode('utf-8'); self.current_uri = uri; self.lbl_status.text = "File opened"
         except Exception as e: self.lbl_status.text = f"Error: {e}"
 
     def save_uri(self, uri):
@@ -281,17 +226,14 @@ class HermesEditor(BoxLayout):
             from jnius import autoclass
             activity = autoclass('org.kivy.android.PythonActivity').mActivity
             stream = activity.getContentResolver().openOutputStream(uri)
-            stream.write(self.text_area.text.encode('utf-8'))
-            stream.close()
-            self.current_uri = uri
-            self.lbl_status.text = "Saved"
+            stream.write(self.text_area.text.encode('utf-8')); stream.close()
+            self.current_uri = uri; self.lbl_status.text = "Saved"
         except Exception as e: self.lbl_status.text = f"Error: {e}"
 
 class MainApp(App):
     def build(self):
         self.title = "Hermes Text Editor"
         Window.softinput_mode = "resize"
-        # Return the main editor directly - splash handled by presplash
         return HermesEditor()
 
 if __name__ == '__main__':
