@@ -11,7 +11,7 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Color, RoundedRectangle
 from kivy.utils import platform
 from kivy.core.window import Window
-from kivy.clock import mainthread, Clock
+from kivy.clock import Clock, mainthread
 from kivy.storage.jsonstore import JsonStorage
 
 # Theme Definitions
@@ -50,6 +50,29 @@ class RoundedButton(Button):
             Color(*self.bg_color)
             RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
 
+class SplashScreen(BoxLayout):
+    def __init__(self, on_complete, **kwargs):
+        super().__init__(orientation='vertical', **kwargs)
+        self.on_complete = on_complete
+        t = THEMES['dark']
+        Window.clearcolor = t['bg']
+        
+        # Brand logo
+        self.logo = Image(
+            source='assets/presplash.png',
+            size_hint=(1, 1),
+            keep_ratio=True,
+            allow_stretch=False
+        )
+        self.add_widget(self.logo)
+        
+        # Schedule transition after UI is ready
+        Clock.schedule_once(self.transition, 1.5)
+
+    def transition(self, dt):
+        if self.on_complete:
+            self.on_complete()
+
 class HermesEditor(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation='vertical', **kwargs)
@@ -58,7 +81,7 @@ class HermesEditor(BoxLayout):
         self.current_uri = None
         self.cache_path = os.path.join(App.get_running_app().user_data_dir, '.cache.txt')
         
-        # UI Setup
+        # Build UI immediately
         self.build_ui()
         self.apply_theme(self.current_theme)
         
@@ -75,7 +98,7 @@ class HermesEditor(BoxLayout):
         
         # Load Cache
         self.load_cache()
-        Clock.schedule_interval(self.save_cache, 10) # Auto-save every 10s
+        Clock.schedule_interval(self.save_cache, 10)
 
     def build_ui(self):
         self.clear_widgets()
@@ -163,8 +186,9 @@ class HermesEditor(BoxLayout):
     def show_about(self):
         t = THEMES[self.current_theme]
         content = BoxLayout(orientation='vertical', padding='20dp', spacing='10dp')
-        content.add_widget(Label(text="Hermes Text Editor v0.4", bold=True, color=t['text']))
+        content.add_widget(Label(text="Hermes Text Editor v0.5", bold=True, color=t['text']))
         content.add_widget(Label(text="Developers:\nSina Chaghimirza & Hermes Agent", halign='center', color=t['muted']))
+        content.add_widget(Label(text="Fixed splash crash & enhanced theming", halign='center', color=t['muted']))
         btn_close = RoundedButton(text="Close", size_hint=(1, None), height='45dp', bg_color=t['accent'])
         content.add_widget(btn_close)
         
@@ -173,7 +197,6 @@ class HermesEditor(BoxLayout):
         popup.open()
 
     def on_keyboard_height(self, window, height):
-        # Auto-sticky buttons above keyboard
         if height > 0:
             self.footer_wrapper.height = '60dp'
             self.footer_wrapper.padding = ['10dp', '5dp']
@@ -183,7 +206,7 @@ class HermesEditor(BoxLayout):
 
     def on_back_pressed(self, *args):
         self.save_cache()
-        return False # Allow close
+        return False
 
     def save_cache(self, *args):
         try:
@@ -268,6 +291,7 @@ class MainApp(App):
     def build(self):
         self.title = "Hermes Text Editor"
         Window.softinput_mode = "resize"
+        # Return the main editor directly - splash handled by presplash
         return HermesEditor()
 
 if __name__ == '__main__':
