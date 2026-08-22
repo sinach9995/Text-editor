@@ -12,7 +12,6 @@ android.api = 34
 android.minapi = 21
 android.ndk = 25b
 android.archs = arm64-v8a
-android.manifest.template = templates/AndroidManifest.xml
 android.debuggable = 0
 android.release = 1
 android.skip_update_check = 1
