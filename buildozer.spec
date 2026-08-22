@@ -10,6 +10,7 @@ orientation = portrait
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 android.api = 34
 android.minapi = 21
+# Force NDK version to avoid conflict with system NDK 27
 android.ndk = 25b
 android.archs = arm64-v8a
 android.manifest.template = templates/AndroidManifest.xml
@@ -17,9 +18,7 @@ android.debuggable = 0
 android.release = 1
 android.skip_update_check = 1
 android.accept_sdk_license = 1
-# Disable all default loading/splash artifacts
 android.show_loading = 0
-android.presplash = 
 android.meta_data = "pyo.show_loading=0"
 icon.filename = assets/icon.png
 icon.compile = 1
