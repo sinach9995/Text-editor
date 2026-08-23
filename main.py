@@ -182,8 +182,11 @@ class HermesEditor(BoxLayout):
 
     def save_cache(self, *args):
         try:
-            with open(self.cache_path, 'w', encoding='utf-8') as f: f.write(self.text_angle if hasattr(self, 'text_area') else '')
-        except: pass
+            if hasattr(self, 'text_area'):
+                with open(self.cache_path, 'w', encoding='utf-8') as f:
+                    f.write(self.text_area.text)
+        except:
+            pass
 
     def load_cache(self):
         if os.path.exists(self.cache_path) and not self.current_uri:
@@ -257,7 +260,7 @@ class HermesEditor(BoxLayout):
             stream = activity.getContentResolver().openOutputStream(uri)
             stream.write(self.text_area.text.encode('utf-8')); stream.close()
             self.current_uri = uri; self.lbl_status.text = "Saved"
-        except Exception as e: self.lbl_status.Number = f"Error: {e}"
+        except Exception as e: self.lbl_status.text = f"Error: {e}"
 
     def save_cache(self, *args):
         try:
