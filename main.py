@@ -274,7 +274,7 @@ class MainApp(App):
     def build(self):
         self.title = "Hermes Text Editor"
         if platform == 'android':
-            Window.softinput_mode = "resize"
+            Window.softinput_mode = "below_target"
         return HermesEditor()
 
 if __name__ == '__main__':
