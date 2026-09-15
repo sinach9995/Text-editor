@@ -41,8 +41,33 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - name: Validate signing secrets
+        run: |
+          missing=""
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -n "$ANDROID_KEYSTORE_PASSWORD" ] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -n "$ANDROID_KEY_ALIAS" ] || missing="$missing ANDROID_KEY_ALIAS"
+          [ -n "$ANDROID_KEY_PASSWORD" ] || missing="$missing ANDROID_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "ERROR: missing required signing secret(s):$missing" >&2
+            exit 1
+          fi
+          echo "All four signing secrets are present."
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Decode release keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/release.keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          if [ ! -s "$RUNNER_TEMP/release.keystore" ]; then
+            echo "ERROR: decoded keystore is missing or empty." >&2
+            exit 1
+          fi
+          echo "Keystore decoded successfully."
       - name: Build signed release APK and AAB
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
@@ -56,9 +81,14 @@ jobs:
           name: Hermes-Editor-release-apk
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+          retention-days: 30
       - name: Upload release AAB
         uses: actions/upload-artifact@v4
         with:
           name: Hermes-Editor-release-aab
           path: app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
+          retention-days: 30
+      - name: Delete temporary keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore"
