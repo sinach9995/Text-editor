@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -109,7 +110,16 @@ class MainActivity : ComponentActivity() {
                         onValueChange = { text = it; cacheDraft(it) },
                         textStyle = TextStyle(color = colors.onBackground, fontSize = 17.sp, lineHeight = 26.sp),
                         modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp).padding(bottom = 128.dp).verticalScroll(rememberScrollState()),
-                        decorationBox = { inner -> if (text.isEmpty()) Text("Start writing…", color = colors.onSurfaceVariant, fontSize = 17.sp); inner() }
+                        decorationBox = { innerTextField ->
+                            if (text.isEmpty()) {
+                                Text(
+                                    "Start writing…",
+                                    color = colors.onSurfaceVariant,
+                                    fontSize = 17.sp
+                                )
+                            }
+                            innerTextField()
+                        }
                     )
                     ActionBar(
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(horizontal = 20.dp, vertical = 28.dp),
@@ -129,9 +139,7 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.weight(1f)) { Text("Hermes Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold); Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
             Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) { DropdownMenuItem({ Text("Light theme") }, onClick = { setTheme(AppTheme.LIGHT); expanded = false }); DropdownMenuItem({ Text("Dark theme") }, onClick = { setTheme(AppTheme.DARK); expanded = false }); HorizontalDivider(); DropdownMenuItem({ Text("About") }, onClick = { about = true; expanded = false }) } }
         } }
-        if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Editor") }, text = { Text("Version 1.0.0
-
-Created by Sina Mirzaii & Notion AI") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
+        if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Editor") }, text = { Text("Version 1.0.0\n\nCreated by Sina Mirzaii & Notion AI") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
     }
 
     @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onSave: () -> Unit) = Surface(modifier = modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) { Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text("New") }; Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text("Open") }; Button(onClick = onSave, modifier = Modifier.weight(1f).height(52.dp)) { Text("Save") } } }
