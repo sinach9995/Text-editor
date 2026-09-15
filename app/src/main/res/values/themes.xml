@@ -1,11 +1,14 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
     <style name="Theme.HermesEditor" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
-        <item name="android:windowSplashScreenAnimationDuration">150</item>
-        <item name="android:postSplashScreenTheme">@style/Theme.HermesEditor</item>
+    </style>
+
+    <style name="Theme.HermesEditor.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="windowSplashScreenAnimationDuration">150</item>
+        <item name="postSplashScreenTheme">@style/Theme.HermesEditor</item>
     </style>
 </resources>
