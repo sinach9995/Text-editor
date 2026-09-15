@@ -113,8 +113,8 @@ class MainActivity : ComponentActivity() {
                             .navigationBarsPadding()
                             .imePadding()
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                        onNew = { discardAction = { documentUri = null; update("", "untitled.txt") }; showDiscardDialog = text.isNotEmpty() },
-                        onOpen = { discardAction = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; showDiscardDialog = text.isNotEmpty() },
+                        onNew = { val action = { documentUri = null; update("", "untitled.txt") }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
+                        onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
                         onSave = { documentUri?.let(::saveToUri) ?: createDocument.launch(if (title == "untitled.txt") "document.txt" else title) }
                     )
                 },
