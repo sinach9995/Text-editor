@@ -12,8 +12,8 @@ android {
         applicationId = "com.sinamirzaii.hermeseditor"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.2"
     }
 
     compileOptions {

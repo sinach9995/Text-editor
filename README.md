@@ -1,8 +1,8 @@
-# Hermes Editor
+# Hermes Text Editor
 
 A clean, fast, and private text editor for Android.
 
-Hermes Editor is designed for writing without distraction: open a text file, write freely, save safely, and return to your work whenever you need it.
+Hermes Text Editor is designed for writing without distraction: open a text file, write freely, save safely, and return to your work whenever you need it.
 
 ## Features
 
@@ -19,7 +19,7 @@ Hermes Editor is designed for writing without distraction: open a text file, wri
 
 ## Built for Android
 
-Hermes Editor is being rebuilt as a native Android application using Kotlin.
+Hermes Text Editor is being rebuilt as a native Android application using Kotlin.
 
 This replaces the earlier Python/Kivy version with a faster, lighter, and more reliable app that follows normal Android behavior for files, keyboard controls, themes, and navigation.
 

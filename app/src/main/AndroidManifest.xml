@@ -3,7 +3,7 @@
         android:allowBackup="true"
         android:icon="@drawable/hermes_editor_icon"
         android:roundIcon="@drawable/hermes_editor_icon"
-        android:label="Hermes Editor"
+        android:label="Hermes Text Editor"
         android:theme="@style/Theme.HermesEditor"
         android:resizeableActivity="true"
         android:supportsRtl="true">

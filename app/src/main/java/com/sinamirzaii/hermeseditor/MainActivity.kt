@@ -8,8 +8,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -18,8 +21,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -88,6 +92,7 @@ class MainActivity : ComponentActivity() {
         var title by rememberSaveable { mutableStateOf("untitled.txt") }
         var selectedTheme by rememberSaveable { mutableStateOf(if (prefs.getString("theme", "dark") == "light") AppTheme.LIGHT else AppTheme.DARK) }
         var showDiscardDialog by remember { mutableStateOf(false) }
+        var showDiscardConfirm by remember { mutableStateOf(false) }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
         fun update(newText: String, newTitle: String) { text = newText; title = newTitle; cacheDraft(newText) }
@@ -100,7 +105,7 @@ class MainActivity : ComponentActivity() {
             BackHandler { cacheDraft(text); finish() }
             Scaffold(
                 containerColor = colors.background,
-                topBar = { TopBar(title, selectedTheme) { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() } },
+                topBar = { TopBar(title, selectedTheme, { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() }, { showDiscardConfirm = true }) },
                 bottomBar = {
                     ActionBar(
                         modifier = Modifier
@@ -133,17 +138,20 @@ class MainActivity : ComponentActivity() {
                 )
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text("Discard current text?") }, text = { Text("Your draft is safely cached, but this editor will be replaced by the selected action.") }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text("Continue") } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text("Cancel") } })
+            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text("Discard current text?") }, text = { Text("This will clear the editor. Your last saved file will not be changed.") }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; documentUri = null; update("", "untitled.txt") }) { Text("Discard") } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text("Cancel") } })
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit) {
+    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, onDiscardRequest: () -> Unit) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(72.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("Hermes Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold); Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
-            Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) { DropdownMenuItem({ Text("Light theme") }, onClick = { setTheme(AppTheme.LIGHT); expanded = false }); DropdownMenuItem({ Text("Dark theme") }, onClick = { setTheme(AppTheme.DARK); expanded = false }); HorizontalDivider(); DropdownMenuItem({ Text("About") }, onClick = { about = true; expanded = false }) } }
+            Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) { Text("Hermes Text Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold); Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
+            Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) { DropdownMenuItem({ Text("Light theme") }, onClick = { setTheme(AppTheme.LIGHT); expanded = false }); DropdownMenuItem({ Text("Dark theme") }, onClick = { setTheme(AppTheme.DARK); expanded = false }); HorizontalDivider(); DropdownMenuItem({ Text("Discard") }, onClick = { onDiscardRequest(); expanded = false }); DropdownMenuItem({ Text("About") }, onClick = { about = true; expanded = false }) } }
         } }
-        if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Editor") }, text = { Text("Version 1.0.0\n\nCreated by Sina Mirzaii & Notion AI") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
+        if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Text Editor") }, text = { Text("Version 1.0.2\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by Sina Chaghamirza.") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
     }
 
-    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onSave: () -> Unit) = Surface(modifier = modifier.fillMaxWidth(), shape = RectangleShape, color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) { Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text("New") }; Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text("Open") }; Button(onClick = onSave, modifier = Modifier.weight(1f).height(52.dp)) { Text("Save") } } }
+    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onSave: () -> Unit) = Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text("New") }; Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text("Open") }; Button(onClick = onSave, modifier = Modifier.weight(1f).height(52.dp)) { Text("Save") } } }
 }
