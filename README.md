@@ -1,24 +1,49 @@
-# Hermes Editor (native Android)
+# Hermes Editor
 
-A lightweight, native Kotlin Android text editor. This replaces the old Python/Kivy build.
+A clean, fast, and private text editor for Android.
 
-## Build it in GitHub
+Hermes Editor is designed for writing without distraction: open a text file, write freely, save safely, and return to your work whenever you need it.
 
-1. Create an empty GitHub repository, then upload these files to its `main` branch.
-2. GitHub Actions runs automatically after the push. Or open **Actions** → **Build Hermes Editor APK** → **Run workflow**.
-3. Download **Hermes-Editor-debug-apk** from the completed workflow's Artifacts section.
+## Features
 
-No personal access token is needed for GitHub Actions to build this project. A token is only needed by an external agent that must push changes into your repository. Do not put any token in this project.
+- Simple, distraction-free writing space
+- Create new text files
+- Open and edit existing text files
+- Save files directly to your phone
+- Open text files from your file manager
+- Automatic draft recovery
+- Light and dark themes
+- Modern three-dot settings menu
+- Smart keyboard-aware controls
+- Smooth scrolling for long documents
 
-## Release signing
+## Built for Android
 
-The included workflow intentionally produces a debug APK for testing. Before publishing or distributing broadly, create your own release keystore and add it as private GitHub repository secrets. Never commit a keystore or passwords.
+Hermes Editor is being rebuilt as a native Android application using Kotlin.
 
-## Core behavior
+This replaces the earlier Python/Kivy version with a faster, lighter, and more reliable app that follows normal Android behavior for files, keyboard controls, themes, and navigation.
 
-- Native Android file open/save dialogs
-- Opens text files sent from a file manager
-- Light/dark themes saved between launches
-- Draft cache and automatic recovery
-- Action bar moves above the real keyboard using Android IME insets
-- New/Open prompts before discarding unsaved text
+## Current status
+
+The app is currently under active development and testing.
+
+The first native build focuses on a solid writing experience:
+
+1. Write and edit text comfortably
+2. Open and save files safely
+3. Recover unfinished drafts
+4. Support light and dark themes
+5. Work well across different Android phones and keyboards
+
+More features will be added over time.
+
+## Credits
+
+Coded by Hermes Agent and Notion AI  
+with help, direction, and oversight by Sina Chaghamirza.
+
+## Development
+
+This repository contains the source code and GitHub Actions workflow used to build the Android application.
+
+Test APK builds are generated automatically through GitHub Actions.
