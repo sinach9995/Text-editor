@@ -19,12 +19,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.core.view.WindowCompat
 
 private enum class AppTheme { DARK, LIGHT }
 
@@ -52,7 +52,6 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        WindowCompat.setDecorFitsSystemWindows(window, false)
         handleIncomingIntent(intent)
         setContent { HermesEditor() }
     }
@@ -102,32 +101,36 @@ class MainActivity : ComponentActivity() {
             Scaffold(
                 containerColor = colors.background,
                 topBar = { TopBar(title, selectedTheme) { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() } },
-                contentWindowInsets = WindowInsets.safeDrawing
-            ) { padding ->
-                Box(Modifier.fillMaxSize().padding(padding)) {
-                    BasicTextField(
-                        value = text,
-                        onValueChange = { text = it; cacheDraft(it) },
-                        textStyle = TextStyle(color = colors.onBackground, fontSize = 17.sp, lineHeight = 26.sp),
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp).padding(bottom = 128.dp).verticalScroll(rememberScrollState()),
-                        decorationBox = { innerTextField ->
-                            if (text.isEmpty()) {
-                                Text(
-                                    "Start writing…",
-                                    color = colors.onSurfaceVariant,
-                                    fontSize = 17.sp
-                                )
-                            }
-                            innerTextField()
-                        }
-                    )
+                bottomBar = {
                     ActionBar(
-                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(horizontal = 20.dp, vertical = 28.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .imePadding()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                         onNew = { discardAction = { documentUri = null; update("", "untitled.txt") }; showDiscardDialog = text.isNotEmpty() },
                         onOpen = { discardAction = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; showDiscardDialog = text.isNotEmpty() },
                         onSave = { documentUri?.let(::saveToUri) ?: createDocument.launch(if (title == "untitled.txt") "document.txt" else title) }
                     )
-                }
+                },
+                contentWindowInsets = WindowInsets.safeDrawing
+            ) { innerPadding ->
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it; cacheDraft(it) },
+                    textStyle = TextStyle(color = colors.onBackground, fontSize = 17.sp, lineHeight = 26.sp),
+                    modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(rememberScrollState()),
+                    decorationBox = { innerTextField ->
+                        if (text.isEmpty()) {
+                            Text(
+                                "Start writing…",
+                                color = colors.onSurfaceVariant,
+                                fontSize = 17.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                )
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text("Discard current text?") }, text = { Text("Your draft is safely cached, but this editor will be replaced by the selected action.") }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text("Continue") } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text("Cancel") } })
         }
@@ -142,5 +145,5 @@ class MainActivity : ComponentActivity() {
         if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Editor") }, text = { Text("Version 1.0.0\n\nCreated by Sina Mirzaii & Notion AI") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
     }
 
-    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onSave: () -> Unit) = Surface(modifier = modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) { Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text("New") }; Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text("Open") }; Button(onClick = onSave, modifier = Modifier.weight(1f).height(52.dp)) { Text("Save") } } }
+    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onSave: () -> Unit) = Surface(modifier = modifier.fillMaxWidth(), shape = RectangleShape, color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) { Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text("New") }; Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text("Open") }; Button(onClick = onSave, modifier = Modifier.weight(1f).height(52.dp)) { Text("Save") } } }
 }
