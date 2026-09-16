@@ -258,7 +258,7 @@ class MainActivity : ComponentActivity() {
                             .navigationBarsPadding()
                             .imePadding()
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                        onNew = { val action = { documentUri = null; update("", "untitled.txt", true) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
+                        onNew = { val action = { documentUri = null; update("", "untitled.txt") }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
                         onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
                         onQuickSave = { documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
                         onSaveAs = { showFormatChoice = true },
@@ -298,7 +298,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
-            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; documentUri = null; update("", "untitled.txt", true) }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
+            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; documentUri = null; update("", "untitled.txt") }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
             if (dirSuggest != null) {
                 val toRtl = dirSuggest == true
                 AlertDialog(
