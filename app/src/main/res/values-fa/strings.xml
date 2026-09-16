@@ -36,7 +36,7 @@
     <string name="saveas_title">قالب را انتخاب کنید</string>
     <string name="saveas_txt">متن (.txt)</string>
     <string name="saveas_md">Markdown (.md)</string>
-    <string name="about_body">Version %1$s\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by\nSina Chaghamirza · AsoraKSH</string>
+    <string name="about_body">نسخه %1$s\n\nساخته‌شده توسط Hermes Agent و Notion AI\nبا کمک، راهنمایی و نظارت\nSina Chaghamirza · AsoraKSH</string>
 
     <string-array name="help_titles">
         <item>Hermes Text Editor</item>

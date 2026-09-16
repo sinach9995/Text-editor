@@ -58,7 +58,7 @@ private enum class AppTheme { DARK, LIGHT }
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("hermes_editor", MODE_PRIVATE) }
     private var documentUri: Uri? = null
-    private var updateEditor: ((String, String, Boolean) -> Unit)? = null
+    private var updateEditor: ((String, String) -> Unit)? = null
     private var pendingDocument: Pair<String, String>? = null
 
     override fun attachBaseContext(newBase: Context) {
@@ -76,8 +76,8 @@ class MainActivity : ComponentActivity() {
                 contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 val text = contentResolver.openInputStream(it)?.bufferedReader(Charsets.UTF_8)?.use { reader -> reader.readText() } ?: ""
                 documentUri = it
-                updateEditor?.invoke(text, displayName(it), true)
-            } catch (error: Exception) { updateEditor?.invoke("", msg("Could not open file", "فایل باز نشد"), true) }
+                updateEditor?.invoke(text, displayName(it))
+            } catch (error: Exception) { updateEditor?.invoke("", msg("Could not open file", "فایل باز نشد")) }
         }
     }
     private val createDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
             documentUri = uri
             val document = text to displayName(uri)
             pendingDocument = document
-            updateEditor?.invoke(document.first, document.second, true)
+            updateEditor?.invoke(document.first, document.second)
         } catch (_: Exception) { }
     }
     private fun saveToUri(uri: Uri) {
@@ -126,16 +126,16 @@ class MainActivity : ComponentActivity() {
         try {
             contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) }
             documentUri = uri
-            updateEditor?.invoke(draft, displayName(uri), false)
-        } catch (_: Exception) { updateEditor?.invoke(draft, msg("Could not save file", "فایل ذخیره نشد"), false) }
+            updateEditor?.invoke(draft, displayName(uri))
+        } catch (_: Exception) { updateEditor?.invoke(draft, msg("Could not save file", "فایل ذخیره نشد")) }
     }
     private fun saveAsToUri(uri: Uri) {
         val draft = prefs.getString("draft", "") ?: ""
         try {
             contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) }
             documentUri = uri
-            updateEditor?.invoke(draft, displayName(uri), true)
-        } catch (_: Exception) { updateEditor?.invoke(draft, msg("Could not save file", "فایل ذخیره نشد"), true) }
+            updateEditor?.invoke(draft, displayName(uri))
+        } catch (_: Exception) { updateEditor?.invoke(draft, msg("Could not save file", "فایل ذخیره نشد")) }
     }
     private fun cacheDraft(text: String? = null) { prefs.edit().putString("draft", text ?: prefs.getString("draft", "") ?: "").apply() }
     private fun baseName(title: String) = title.substringBeforeLast('.', title).ifBlank { "document" }
@@ -204,13 +204,7 @@ class MainActivity : ComponentActivity() {
         var showLaunch by remember { mutableStateOf(true) }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
-        fun update(newText: String, newTitle: String, resetDir: Boolean = true) {
-            text = newText; title = newTitle; mdPreview = isMarkdownName(newTitle); cacheDraft(newText)
-            if (resetDir) {
-                docRtl = false
-                dirSuggest = if (newText.isNotBlank() && detectDirection(newText) == true) true else null
-            }
-        }
+        fun update(newText: String, newTitle: String) { text = newText; title = newTitle; mdPreview = isMarkdownName(newTitle); cacheDraft(newText) }
         fun setLang(code: String) {
             if (code == lang) return
             prefs.edit().putString("lang", code).apply()
@@ -219,7 +213,18 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(Unit) {
             updateEditor = ::update
-            pendingDocument?.let { update(it.first, it.second, true); pendingDocument = null }
+            pendingDocument?.let { update(it.first, it.second); pendingDocument = null }
+        }
+        // Suggest a writing direction only when the opened document clearly
+        // mismatches the currently active direction. The manual choice is kept
+        // for the session; each document title prompts at most once.
+        var dirPromptedFor by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(title) {
+            if (dirPromptedFor != title && text.isNotBlank()) {
+                val detected = detectDirection(text)
+                dirSuggest = if (detected != null && detected != docRtl) detected else null
+                dirPromptedFor = title
+            }
         }
         DisposableEffect(Unit) { onDispose { updateEditor = null; cacheDraft(text) } }
         if (showLaunch) {
