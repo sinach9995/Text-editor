@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_new">جدید</string>
+    <string name="ui_open">باز کردن</string>
+    <string name="ui_save">ذخیره</string>
+    <string name="ui_save_as">ذخیره با نام دیگر…</string>
+    <string name="ui_export_txt">خروجی متن ساده…</string>
+    <string name="theme_to_light">پوسته روشن</string>
+    <string name="theme_to_dark">پوسته تیره</string>
+    <string name="edit_md">ویرایش Markdown</string>
+    <string name="preview_md">پیش‌نمایش Markdown</string>
+    <string name="discard">دور انداختن</string>
+    <string name="help">راهنما</string>
+    <string name="about">درباره</string>
+    <string name="close">بستن</string>
+    <string name="cancel">لغو</string>
+    <string name="cont">ادامه</string>
+    <string name="discard_title">متن فعلی دور انداخته شود؟</string>
+    <string name="discard_open">پیش‌نویس شما به‌صورت امن ذخیره شده، اما ویرایشگر با اقدام انتخاب‌شده جایگزین می‌شود.</string>
+    <string name="discard_clear">این کار ویرایشگر را پاک می‌کند. آخرین فایل ذخیره‌شده شما تغییر نمی‌کند.</string>
+    <string name="err_open">فایل باز نشد</string>
+    <string name="err_save">فایل ذخیره نشد</string>
+    <string name="hint">شروع به نوشتن…</string>
+    <string name="lang_desc">زبان</string>
+    <string name="dir_menu">جهت متن</string>
+    <string name="dir_ltr">چپ‌به‌راست</string>
+    <string name="dir_rtl">راست‌به‌چپ</string>
+    <string name="dir_sug_title_fa">به نظر می‌رسد این فایل فارسی است.</string>
+    <string name="dir_sug_text_fa">جهت نوشتن را راست‌به‌چپ تنظیم کنم؟</string>
+    <string name="dir_sug_go_rtl">راست‌به‌چپ شود</string>
+    <string name="dir_sug_keep_ltr">چپ‌به‌راست بماند</string>
+    <string name="dir_sug_title_en">به نظر می‌رسد این فایل انگلیسی است.</string>
+    <string name="dir_sug_text_en">جهت نوشتن را چپ‌به‌راست تنظیم کنم؟</string>
+    <string name="dir_sug_go_ltr">چپ‌به‌راست شود</string>
+    <string name="dir_sug_keep_rtl">راست‌به‌چپ بماند</string>
+    <string name="saveas_title">قالب را انتخاب کنید</string>
+    <string name="saveas_txt">متن (.txt)</string>
+    <string name="saveas_md">Markdown (.md)</string>
+    <string name="about_body">Version %1$s\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by\nSina Chaghamirza · AsoraKSH</string>
+
+    <string-array name="help_titles">
+        <item>Hermes Text Editor</item>
+        <item>ساخت فایل جدید</item>
+        <item>باز کردن فایل</item>
+        <item>ویرایش متن</item>
+        <item>فایل‌های Markdown</item>
+        <item>ذخیره</item>
+        <item>ذخیره با نام دیگر</item>
+        <item>خروجی متن ساده از Markdown</item>
+        <item>جهت متن</item>
+        <item>پوسته و زبان</item>
+        <item>پیوندها</item>
+        <item>حریم خصوصی</item>
+    </string-array>
+    <string-array name="help_bodies">
+        <item>Hermes Text Editor یک ویرایشگر ساده و آفلاین برای فایل‌های متنی و Markdown است.</item>
+        <item>برای شروع یک سند خالی، روی جدید بزنید. وقتی آماده بودید، روی ذخیره بزنید و نام و پوشه را انتخاب کنید.</item>
+        <item>روی باز کردن بزنید تا یک فایل .txt یا .md را از انتخاب‌گر فایل اندروید انتخاب کنید. همچنین می‌توانید یک فایل پشتیبانی‌شده را از برنامه مدیریت فایل اندروید باز کنید و Hermes Text Editor را انتخاب کنید.</item>
+        <item>به‌صورت معمول بنویسید و ویرایش کنید. نام فایل زیر عنوان برنامه نمایش داده می‌شود. اگر نام فایل طولانی است، آن را به طرفین بکشید تا نام کامل دیده شود.</item>
+        <item>فایل‌های Markdown ابتدا در حالت پیش‌نمایش باز می‌شوند. از منوی سه‌نقطه گزینه ویرایش Markdown را انتخاب کنید تا متن اصلی را تغییر دهید. برای دیدن نتیجه قالب‌بندی‌شده، پیش‌نمایش Markdown را انتخاب کنید. هنگام ذخیره، متن اصلی Markdown حفظ می‌شود.</item>
+        <item>روی ذخیره بزنید تا فایل بازشده به‌روزرسانی شود. برای یک سند جدید، صفحه ذخیره باز می‌شود تا نام و پوشه را انتخاب کنید.</item>
+        <item>دکمه ذخیره ▲ را نگه دارید، سپس ذخیره با نام دیگر… را انتخاب کنید. می‌توانید یک کپی با نام، پوشه یا پسوند .txt / .md متفاوت بسازید. این گزینه متن را دقیقاً همان‌گونه که نوشته‌اید حفظ می‌کند.</item>
+        <item>دکمه ذخیره ▲ را نگه دارید، سپس خروجی متن ساده… را انتخاب کنید. یک کپی جداگانه با پسوند .txt ساخته می‌شود که نشانه‌های قالب‌بندی Markdown را ندارد. فایل اصلی Markdown تغییر نمی‌کند.</item>
+        <item>اگر جهت نوشتن فعلی با زبان فایل هماهنگ نباشد، Hermes ممکن است برای فایل فارسی حالت راست‌به‌چپ و برای فایل انگلیسی حالت چپ‌به‌راست را پیشنهاد کند. همیشه می‌توانید از منوی سه‌نقطه و گزینه جهت متن آن را دستی تغییر دهید.</item>
+        <item>از منوی سه‌نقطه می‌توانید بین پوسته روشن و تیره، و بین English و فارسی جابه‌جا شوید. انتخاب شما روی دستگاه ذخیره می‌شود.</item>
+        <item>در پیش‌نمایش Markdown، با لمس یک پیوند وب آن را در مرورگر باز کنید. فقط پیوندهای عادی http و https باید باز شوند.</item>
+        <item>Hermes Text Editor برای کار آفلاین طراحی شده است. این برنامه تبلیغ، تحلیل‌گر، ردیابی یا WebView ندارد. فایل‌های شما روی دستگاه می‌مانند؛ مگر زمانی که خودتان از انتخاب‌گر فایل اندروید برای باز کردن یا ذخیره‌کردن استفاده کنید.</item>
+    </string-array>
+</resources>

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_new">New</string>
+    <string name="ui_open">Open</string>
+    <string name="ui_save">Save</string>
+    <string name="ui_save_as">Save as…</string>
+    <string name="ui_export_txt">Export as plain text…</string>
+    <string name="theme_to_light">Light theme</string>
+    <string name="theme_to_dark">Dark theme</string>
+    <string name="edit_md">Edit Markdown</string>
+    <string name="preview_md">Preview Markdown</string>
+    <string name="discard">Discard</string>
+    <string name="help">Help &amp; Guide</string>
+    <string name="about">About</string>
+    <string name="close">Close</string>
+    <string name="cancel">Cancel</string>
+    <string name="cont">Continue</string>
+    <string name="discard_title">Discard current text?</string>
+    <string name="discard_open">Your draft is safely cached, but this editor will be replaced by the selected action.</string>
+    <string name="discard_clear">This will clear the editor. Your last saved file will not be changed.</string>
+    <string name="err_open">Could not open file</string>
+    <string name="err_save">Could not save file</string>
+    <string name="hint">Start writing…</string>
+    <string name="lang_desc">Language</string>
+    <string name="dir_menu">Text direction</string>
+    <string name="dir_ltr">Left-to-right</string>
+    <string name="dir_rtl">Right-to-left</string>
+    <string name="dir_sug_title_fa">This file appears to be Persian.</string>
+    <string name="dir_sug_text_fa">Switch writing direction to right-to-left?</string>
+    <string name="dir_sug_go_rtl">Switch to RTL</string>
+    <string name="dir_sug_keep_ltr">Keep LTR</string>
+    <string name="dir_sug_title_en">This file appears to be English.</string>
+    <string name="dir_sug_text_en">Switch writing direction to left-to-right?</string>
+    <string name="dir_sug_go_ltr">Switch to LTR</string>
+    <string name="dir_sug_keep_rtl">Keep RTL</string>
+    <string name="saveas_title">Choose format</string>
+    <string name="saveas_txt">Text (.txt)</string>
+    <string name="saveas_md">Markdown (.md)</string>
+    <string name="about_body">Version %1$s\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by\nSina Chaghamirza · AsoraKSH</string>
+
+    <string-array name="help_titles">
+        <item>Hermes Text Editor</item>
+        <item>Create a new file</item>
+        <item>Open a file</item>
+        <item>Edit text</item>
+        <item>Markdown files</item>
+        <item>Save</item>
+        <item>Save as</item>
+        <item>Export Markdown as plain text</item>
+        <item>Text direction</item>
+        <item>Themes and language</item>
+        <item>Links</item>
+        <item>Privacy</item>
+    </string-array>
+    <string-array name="help_bodies">
+        <item>Hermes Text Editor is a simple, offline-focused editor for text and Markdown files.</item>
+        <item>Tap New to start a blank document. When you are ready, tap Save and choose a name and folder.</item>
+        <item>Tap Open to choose a .txt or .md file from Android\'s file picker. You can also open a supported file from your Android file manager and choose Hermes Text Editor.</item>
+        <item>Write and edit normally. The file name appears below the app title. If a file name is long, swipe it sideways to see the complete name.</item>
+        <item>Markdown files open in Preview mode. Use the three-dot menu to choose Edit Markdown and change the original Markdown text. Choose Preview Markdown to read the formatted result. Saving keeps the original Markdown source.</item>
+        <item>Tap Save to update the currently open file. For a new document, Save opens the save screen so you can choose a name and folder.</item>
+        <item>Press and hold Save ▲, then choose Save as…. Create another copy with a different name, folder, or .txt / .md extension. Save as keeps your text exactly as written.</item>
+        <item>Press and hold Save ▲, then choose Export as plain text…. This creates a separate .txt copy without Markdown formatting symbols. Your original Markdown file is not changed.</item>
+        <item>Hermes may suggest Right-to-Left for a Persian document or Left-to-Right for an English document when the current writing direction does not match. You can always change this manually in the three-dot menu under Text direction.</item>
+        <item>Use the three-dot menu to switch between Light and Dark themes, or between English and فارسی. These choices are saved on your device.</item>
+        <item>In Markdown Preview, tap a web link to open it in your browser. Only normal http and https links should be opened.</item>
+        <item>Hermes Text Editor is designed to work offline. It does not include ads, analytics, tracking, or a WebView. Your files stay on your device except when you choose to open or save them through Android\'s file picker.</item>
+    </string-array>
+</resources>
