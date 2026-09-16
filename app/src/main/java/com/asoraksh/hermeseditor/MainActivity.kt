@@ -199,6 +199,7 @@ class MainActivity : ComponentActivity() {
         var showHelp by remember { mutableStateOf(false) }
         var showDirMenu by remember { mutableStateOf(false) }
         var dirSuggest by remember { mutableStateOf<Boolean?>(null) }
+        var dirSession by remember { mutableStateOf(0) }
         var docRtl by rememberSaveable { mutableStateOf(false) }
         var mdPreview by rememberSaveable { mutableStateOf(false) }
         var showLaunch by remember { mutableStateOf(true) }
@@ -222,7 +223,6 @@ class MainActivity : ComponentActivity() {
         // mismatches the currently active direction. Tracked per opened
         // document session (not filename), so two files sharing a name each
         // get their own single suggestion. Manual choice is kept.
-        var dirSession by remember { mutableStateOf(0) }
         LaunchedEffect(dirSession) {
             if (text.isNotBlank()) {
                 val detected = detectDirection(text)
