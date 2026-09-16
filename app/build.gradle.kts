@@ -56,7 +56,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core:1.7.0")
     implementation("org.commonmark:commonmark:0.30.0")
     implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
     implementation("org.commonmark:commonmark-ext-task-list-items:0.30.0")

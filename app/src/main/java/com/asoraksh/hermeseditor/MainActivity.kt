@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.asoraksh.hermeseditor
 
 import android.content.Context
@@ -13,8 +15,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -22,8 +26,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -32,6 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -336,6 +341,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable private fun LanguageGlyph(modifier: Modifier = Modifier, tint: Color) {
+        Canvas(modifier) {
+            val r = size.minDimension / 2f
+            val w = r * 0.16f
+            drawCircle(tint, r - w, style = Stroke(w))
+            drawLine(tint, Offset(center.x - r, center.y), Offset(center.x + r, center.y), w)
+            drawOval(tint, Offset(center.x - r * 0.42f, center.y - r), Size(r * 0.84f, r * 2f), style = Stroke(w))
+        }
+    }
+
     @Composable private fun LaunchFrame() {
         Box(Modifier.fillMaxSize().background(colorResource(R.color.splash_background)), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -361,7 +376,7 @@ class MainActivity : ComponentActivity() {
                 )
                 DropdownMenuItem(
                     text = { Text(if (lang == "fa") "English" else "فارسی") },
-                    leadingIcon = { Icon(Icons.Filled.Language, contentDescription = stringResource(R.string.lang_desc), modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface) },
+                    leadingIcon = { LanguageGlyph(modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface) },
                     onClick = { setLang(if (lang == "fa") "en" else "fa"); expanded = false }
                 )
                 DropdownMenuItem(text = { Text(stringResource(R.string.dir_menu)) }, onClick = { onDirRequest(); expanded = false })
