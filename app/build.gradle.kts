@@ -5,15 +5,15 @@ plugins {
 }
 
 android {
-    namespace = "com.sinamirzaii.hermeseditor"
+    namespace = "com.asoraksh.hermeseditor"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.sinamirzaii.hermeseditor"
+        applicationId = "com.asoraksh.hermeseditor"
         minSdk = 23
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     signingConfigs {
@@ -56,5 +56,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("org.commonmark:commonmark:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
+    implementation("org.commonmark:commonmark-ext-task-list-items:0.30.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

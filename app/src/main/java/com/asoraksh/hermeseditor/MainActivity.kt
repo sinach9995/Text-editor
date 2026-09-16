@@ -1,8 +1,9 @@
-package com.sinamirzaii.hermeseditor
+package com.asoraksh.hermeseditor
 
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -84,7 +85,32 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) { updateEditor?.invoke(draft, "Could not save file") }
     }
     private fun cacheDraft(text: String? = null) { prefs.edit().putString("draft", text ?: prefs.getString("draft", "") ?: "").apply() }
-    private fun displayName(uri: Uri) = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { "Document.txt" } ?: "Document.txt"
+    private fun displayName(uri: Uri): String {
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) {
+                        val name = cursor.getString(index)
+                        if (!name.isNullOrBlank()) return name
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        val fallback = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        return if (fallback != null && !fallback.startsWith("msf:") && !fallback.contains(":")) fallback else "Document.txt"
+    }
+
+    private fun openLink(url: String) {
+        try {
+            val parsed = Uri.parse(url)
+            if (parsed.scheme == "http" || parsed.scheme == "https") {
+                startActivity(Intent(Intent.ACTION_VIEW, parsed))
+            }
+        } catch (_: Exception) { }
+    }
+
+    private fun isMarkdownName(name: String) = name.endsWith(".md", ignoreCase = true) || name.endsWith(".markdown", ignoreCase = true)
 
     @Composable
     private fun HermesEditor() {
@@ -93,9 +119,10 @@ class MainActivity : ComponentActivity() {
         var selectedTheme by rememberSaveable { mutableStateOf(if (prefs.getString("theme", "dark") == "light") AppTheme.LIGHT else AppTheme.DARK) }
         var showDiscardDialog by remember { mutableStateOf(false) }
         var showDiscardConfirm by remember { mutableStateOf(false) }
+        var mdPreview by rememberSaveable { mutableStateOf(false) }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
-        fun update(newText: String, newTitle: String) { text = newText; title = newTitle; cacheDraft(newText) }
+        fun update(newText: String, newTitle: String) { text = newText; title = newTitle; mdPreview = isMarkdownName(newTitle); cacheDraft(newText) }
         LaunchedEffect(Unit) {
             updateEditor = ::update
             pendingDocument?.let { update(it.first, it.second); pendingDocument = null }
@@ -105,7 +132,7 @@ class MainActivity : ComponentActivity() {
             BackHandler { cacheDraft(text); finish() }
             Scaffold(
                 containerColor = colors.background,
-                topBar = { TopBar(title, selectedTheme, { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() }, { showDiscardConfirm = true }) },
+                topBar = { TopBar(title, selectedTheme, { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() }, { showDiscardConfirm = true }, isMarkdownName(title), mdPreview, { mdPreview = !mdPreview }) },
                 bottomBar = {
                     ActionBar(
                         modifier = Modifier
@@ -120,37 +147,45 @@ class MainActivity : ComponentActivity() {
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it; cacheDraft(it) },
-                    textStyle = TextStyle(color = colors.onBackground, fontSize = 17.sp, lineHeight = 26.sp),
-                    modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(rememberScrollState()),
-                    decorationBox = { innerTextField ->
-                        if (text.isEmpty()) {
-                            Text(
-                                "Start writing…",
-                                color = colors.onSurfaceVariant,
-                                fontSize = 17.sp
-                            )
+                if (isMarkdownName(title) && mdPreview) {
+                    MarkdownPreview(
+                        markdown = text,
+                        onLinkClick = ::openLink,
+                        modifier = Modifier.fillMaxSize().padding(innerPadding)
+                    )
+                } else {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it; cacheDraft(it) },
+                        textStyle = TextStyle(color = colors.onBackground, fontSize = 17.sp, lineHeight = 26.sp),
+                        modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(rememberScrollState()),
+                        decorationBox = { innerTextField ->
+                            if (text.isEmpty()) {
+                                Text(
+                                    "Start writing…",
+                                    color = colors.onSurfaceVariant,
+                                    fontSize = 17.sp
+                                )
+                            }
+                            innerTextField()
                         }
-                        innerTextField()
-                    }
-                )
+                    )
+                }
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text("Discard current text?") }, text = { Text("Your draft is safely cached, but this editor will be replaced by the selected action.") }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text("Continue") } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text("Cancel") } })
             if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text("Discard current text?") }, text = { Text("This will clear the editor. Your last saved file will not be changed.") }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; documentUri = null; update("", "untitled.txt") }) { Text("Discard") } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text("Cancel") } })
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, onDiscardRequest: () -> Unit) {
+    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(72.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) { Text("Hermes Text Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold); Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
-            Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) { DropdownMenuItem({ Text("Light theme") }, onClick = { setTheme(AppTheme.LIGHT); expanded = false }); DropdownMenuItem({ Text("Dark theme") }, onClick = { setTheme(AppTheme.DARK); expanded = false }); HorizontalDivider(); DropdownMenuItem({ Text("Discard") }, onClick = { onDiscardRequest(); expanded = false }); DropdownMenuItem({ Text("About") }, onClick = { about = true; expanded = false }) } }
+            Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) { DropdownMenuItem({ Text("Light theme") }, onClick = { setTheme(AppTheme.LIGHT); expanded = false }); DropdownMenuItem({ Text("Dark theme") }, onClick = { setTheme(AppTheme.DARK); expanded = false }); HorizontalDivider(); if (isMarkdown) DropdownMenuItem({ Text(if (previewing) "Edit Markdown" else "Preview Markdown") }, onClick = { onTogglePreview(); expanded = false }); DropdownMenuItem({ Text("Discard") }, onClick = { onDiscardRequest(); expanded = false }); DropdownMenuItem({ Text("About") }, onClick = { about = true; expanded = false }) } }
         } }
-        if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Text Editor") }, text = { Text("Version 1.0.3\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by Sina Chaghamirza.") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
+        if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Text Editor") }, text = { Text("Version 1.0.0\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by\nSina Chaghamirza · AsoraKSH") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Close") } })
     }
 
     @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onSave: () -> Unit) = Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) { Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text("New") }; Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text("Open") }; Button(onClick = onSave, modifier = Modifier.weight(1f).height(52.dp)) { Text("Save") } } }
