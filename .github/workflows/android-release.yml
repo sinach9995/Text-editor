@@ -28,6 +28,7 @@ jobs:
           name: Hermes-Editor-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 7
 
   release:
     runs-on: ubuntu-latest
@@ -81,14 +82,14 @@ jobs:
           name: Hermes-Editor-release-apk
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
       - name: Upload release AAB
         uses: actions/upload-artifact@v4
         with:
           name: Hermes-Editor-release-aab
           path: app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
       - name: Delete temporary keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.keystore"
