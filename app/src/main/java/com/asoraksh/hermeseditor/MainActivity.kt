@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
         val history = remember { EditorHistory() }
         var historyTick by remember { mutableStateOf(0) }
         val snackbar = remember { SnackbarHostState() }
-        val scope = rememberCoroutineScope()
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
         val zoomDocument: (Float) -> Unit = { factor ->
             if (factor.isFinite() && factor > 0f) {
@@ -303,6 +303,7 @@ class MainActivity : ComponentActivity() {
                 containerColor = colors.background,
                 snackbarHost = { SnackbarHost(snackbar) },
                 topBar = {
+                    Column {
                     TopBar(
                         title = title,
                         theme = selectedTheme,
@@ -317,6 +318,16 @@ class MainActivity : ComponentActivity() {
                         onHelpRequest = { showHelp = true },
                         onFind = { finding = true; mdPreview = false }
                     )
+                    if (finding) FindBar(
+                        query = query,
+                        onQueryChange = { query = it; matchIndex = 0 },
+                        count = matches.size,
+                        index = matchIndex.coerceIn(0, (matches.size - 1).coerceAtLeast(0)),
+                        onPrevious = { if (matches.isNotEmpty()) matchIndex = (matchIndex.coerceAtMost(matches.lastIndex) - 1 + matches.size) % matches.size },
+                        onNext = { if (matches.isNotEmpty()) matchIndex = (matchIndex + 1) % matches.size },
+                        onClose = { finding = false; query = ""; matchIndex = 0; focusManager.clearFocus() }
+                    )
+                    }
                 },
                 bottomBar = {
                     Column(Modifier.navigationBarsPadding().imePadding()) {
@@ -422,6 +433,34 @@ class MainActivity : ComponentActivity() {
                 dismissButton = { TextButton(onClick = { showFormatChoice = false }) { Text(stringResource(R.string.cancel)) } }
             )
             if (showHelp) HelpDialog { showHelp = false }
+        }
+    }
+
+    @Composable
+    private fun FindBar(query: String, onQueryChange: (String) -> Unit, count: Int, index: Int,
+                        onPrevious: () -> Unit, onNext: () -> Unit, onClose: () -> Unit) {
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { focus.requestFocus() }
+        Surface(color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = query, onValueChange = onQueryChange, singleLine = true,
+                        label = { Text(stringResource(R.string.find_query)) },
+                        textStyle = TextStyle(textDirection = TextDirection.Content),
+                        modifier = Modifier.weight(1f).focusRequester(focus)
+                    )
+                    IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = getString(R.string.close) }) { Text("×", fontSize = 24.sp) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (count == 0) stringResource(R.string.no_matches) else stringResource(R.string.match_count, index + 1, count),
+                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall
+                    )
+                    IconButton(onClick = onPrevious, enabled = count > 0, modifier = Modifier.semantics { contentDescription = getString(R.string.previous_match) }) { Text("↑", fontSize = 22.sp) }
+                    IconButton(onClick = onNext, enabled = count > 0, modifier = Modifier.semantics { contentDescription = getString(R.string.next_match) }) { Text("↓", fontSize = 22.sp) }
+                }
+            }
         }
     }
 

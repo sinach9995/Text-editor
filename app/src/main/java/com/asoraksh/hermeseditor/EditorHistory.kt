@@ -87,14 +87,14 @@ class EditorHistory(
 fun findMatches(text: String, query: String): List<IntRange> {
     if (query.isEmpty() || text.isEmpty()) return emptyList()
     val result = mutableListOf<IntRange>()
-    val lower = text.lowercase()
-    val needle = query.lowercase()
+    // Search the original string: lowercasing can expand Unicode characters
+    // and shift every subsequent selection/highlight offset.
     var index = 0
-    while (index <= lower.length - needle.length) {
-        if (lower.regionMatches(index, needle, 0, needle.length)) {
-            result.add(index until (index + needle.length))
-            index += needle.length
-        } else index++
+    while (index <= text.length - query.length) {
+        val found = text.indexOf(query, startIndex = index, ignoreCase = true)
+        if (found < 0) break
+        result.add(found until (found + query.length))
+        index = found + query.length
     }
     return result
 }
