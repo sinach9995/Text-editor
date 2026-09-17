@@ -210,6 +210,12 @@ class MainActivity : ComponentActivity() {
         val snackbar = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
         var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
+        val zoomDocument: (Float) -> Unit = { factor ->
+            if (factor.isFinite() && factor > 0f) {
+                fontSize = (fontSize * factor).coerceIn(13f, 30f)
+                prefs.edit().putFloat("document_font_size", fontSize).apply()
+            }
+        }
         var finding by rememberSaveable { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
         var matchIndex by remember { mutableStateOf(0) }
@@ -342,7 +348,7 @@ class MainActivity : ComponentActivity() {
                             markdown = text,
                             onLinkClick = ::openLink,
                             fontSize = fontSize,
-                            modifier = Modifier.fillMaxSize().padding(innerPadding)
+                            modifier = Modifier.fillMaxSize().padding(innerPadding).documentPinchZoom(zoomDocument)
                         )
                     }
                 } else {
@@ -364,7 +370,7 @@ class MainActivity : ComponentActivity() {
                             activeMatch = activeMatch
                         ),
                         onTextLayout = { textLayout = it },
-                        modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(editorScroll),
+                        modifier = Modifier.fillMaxSize().padding(innerPadding).documentPinchZoom(zoomDocument).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(editorScroll),
                         decorationBox = { innerTextField ->
                             if (text.isEmpty()) {
                                 Text(
