@@ -206,6 +206,19 @@ class MainActivity : ComponentActivity() {
         var editor by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(prefs.getString("draft", "") ?: "")) }
         val text = editor.text
         val history = remember { EditorHistory() }
+        var pastedEdit by remember { mutableStateOf(false) }
+        val systemClipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+        val editorClipboard = remember(systemClipboard, history) {
+            object : androidx.compose.ui.platform.ClipboardManager {
+                override fun getText(): androidx.compose.ui.text.AnnotatedString? {
+                    history.breakCoalescing()
+                    pastedEdit = true
+                    return systemClipboard.getText()
+                }
+                override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) = systemClipboard.setText(annotatedString)
+                override fun hasText(): Boolean = systemClipboard.hasText()
+            }
+        }
         var historyTick by remember { mutableStateOf(0) }
         val snackbar = remember { SnackbarHostState() }
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -344,7 +357,7 @@ class MainActivity : ComponentActivity() {
                         onNew = { val action = { documentUri = null; update("", "untitled.txt", true) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
                         onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
                         onQuickSave = { documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
-                        onSaveAs = { showFormatChoice = true },
+                        onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
                         onExport = { exportDocument.launch(baseName(title) + ".txt") }
                     )
                     }
@@ -363,10 +376,12 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 } else {
+                    CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboardManager provides editorClipboard) {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
-                            history.record(snapshot(editor), snapshot(newValue), System.currentTimeMillis())
+                            history.record(snapshot(editor), snapshot(newValue), android.os.SystemClock.uptimeMillis(), allowCoalescing = !pastedEdit)
+                            pastedEdit = false
                             editor = newValue
                             cacheDraft(newValue.text)
                             if (finding && matches.isNotEmpty() && newValue.text != text) matchIndex = 0
@@ -394,6 +409,7 @@ class MainActivity : ComponentActivity() {
                             innerTextField()
                         }
                     )
+                    }
                 }
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
@@ -425,8 +441,8 @@ class MainActivity : ComponentActivity() {
                 title = { Text(stringResource(R.string.saveas_title)) },
                 text = {
                     Column {
-                        TextButton(onClick = { showFormatChoice = false; createTxtDocument.launch(baseName(title) + ".txt") }) { Text(stringResource(R.string.saveas_txt)) }
-                        TextButton(onClick = { showFormatChoice = false; createMdDocument.launch(baseName(title) + ".md") }) { Text(stringResource(R.string.saveas_md)) }
+                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); createTxtDocument.launch(baseName(title) + ".txt") }) { Text(stringResource(R.string.saveas_txt)) }
+                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); createMdDocument.launch(baseName(title) + ".md") }) { Text(stringResource(R.string.saveas_md)) }
                     }
                 },
                 confirmButton = { },

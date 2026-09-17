@@ -4,10 +4,14 @@ package com.asoraksh.hermeseditor
  * Bounded undo/redo history with UTF-16 selection offsets.
  * Not thread-safe; all calls happen on the main thread.
  *
- * Coalescing policy: rapid adjacent single-character typing or backspace
- * merges into one step; paste, larger edits and non-adjacent changes start
- * a new entry. A new edit clears redo. Selection-only updates never create
- * an entry. Memory is bounded by MAX_ENTRIES and total stored characters.
+ * Coalescing policy: rapid adjacent single-character typing or backspace of
+ * the same direction merges into one step. The comparison uses the most
+ * recent POST-EDIT snapshot (tracked separately), never the run's earliest
+ * stack entry, so runs of any length coalesce correctly. The undo stack keeps
+ * the earliest snapshot of the run, so one Undo reverts the whole run.
+ * Undo, Redo, reset (open/new/Save As), paste, a multi-character edit, a
+ * selection-only update, or a pause longer than COALESCE_MILLIS reset the
+ * run. A new edit clears redo. Memory is bounded by maxEntries/maxTotalChars.
  */
 data class EditorSnapshot(val text: String, val start: Int = 0, val end: Int = start)
 
@@ -17,27 +21,42 @@ class EditorHistory(
 ) {
     private val undoStack = ArrayDeque<EditorSnapshot>()
     private val redoStack = ArrayDeque<EditorSnapshot>()
+    private var lastPostEdit: EditorSnapshot? = null
+    private var lastChangeWasInsert = false
+    private var lastChangeSingle = false
     private var lastMillis = 0L
 
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
 
-    fun reset(snapshot: EditorSnapshot) {
-        undoStack.clear(); redoStack.clear(); lastMillis = 0
+    fun breakCoalescing() {
+        lastPostEdit = null
+        lastChangeSingle = false
+        lastMillis = 0
     }
 
-    fun record(before: EditorSnapshot, after: EditorSnapshot, nowMillis: Long) {
-        if (before.text == after.text) return
-        redoStack.clear()
-        val adjacent = nowMillis - lastMillis <= 900 && undoStack.isNotEmpty() &&
-            isAdjacentSingleChar(before, undoStack.last())
-        if (adjacent) {
-            // Keep the earliest text of the run, take the newest selection.
-            val base = undoStack.removeLast()
-            undoStack.addLast(EditorSnapshot(base.text, after.start, after.end))
-        } else {
-            pushBounded(before)
+    fun reset(snapshot: EditorSnapshot) {
+        undoStack.clear(); redoStack.clear()
+        breakCoalescing()
+    }
+
+    fun record(before: EditorSnapshot, after: EditorSnapshot, nowMillis: Long, allowCoalescing: Boolean = true) {
+        if (before.text == after.text) {
+            // Selection-only: never an entry, and it ends any coalescing run.
+            lastPostEdit = null; lastMillis = 0
+            return
         }
+        redoStack.clear()
+        val last = lastPostEdit
+        val insert = after.text.length > before.text.length
+        val single = allowCoalescing && isSingleCharEdit(before, after)
+        val coalesce = last != null && before == last && undoStack.isNotEmpty() &&
+            lastChangeSingle && single && lastChangeWasInsert == insert &&
+            nowMillis - lastMillis in 0..COALESCE_MILLIS
+        if (!coalesce) pushBounded(before)
+        lastPostEdit = after
+        lastChangeWasInsert = insert
+        lastChangeSingle = single
         lastMillis = nowMillis
         trimTotal()
     }
@@ -45,30 +64,29 @@ class EditorHistory(
     fun undo(current: EditorSnapshot): EditorSnapshot? {
         val target = undoStack.removeLastOrNull() ?: return null
         redoStack.addLast(current)
+        lastPostEdit = null; lastMillis = 0
         return target
     }
 
     fun redo(current: EditorSnapshot): EditorSnapshot? {
         val target = redoStack.removeLastOrNull() ?: return null
         undoStack.addLast(current)
+        lastPostEdit = null; lastMillis = 0
         return target
     }
 
-    private fun undoStackLastBase(): EditorSnapshot = undoStack.lastOrNull() ?: EditorSnapshot("")
-
-    private fun isAdjacentSingleChar(before: EditorSnapshot, base: EditorSnapshot): Boolean {
-        val prev = base.text
-        val next = before.text
-        if (kotlin.math.abs(prev.length - next.length) != 1) return false
-        val (short, long) = if (prev.length < next.length) prev to next else next to prev
-        if (short != long.removeRange(pickRange(short, long))) return false
-        return true
-    }
-
-    private fun pickRange(short: String, long: String): IntRange {
-        var i = 0
-        while (i < short.length && short[i] == long[i]) i++
-        return i..i
+    /** A collapsed-cursor insertion or Backspace at the current cursor. */
+    private fun isSingleCharEdit(before: EditorSnapshot, after: EditorSnapshot): Boolean {
+        if (before.start != before.end || after.start != after.end) return false
+        val cursor = before.start
+        if (cursor !in 0..before.text.length) return false
+        return when (after.text.length - before.text.length) {
+            1 -> after.start == cursor + 1 &&
+                after.text.removeRange(cursor, cursor + 1) == before.text
+            -1 -> cursor > 0 && after.start == cursor - 1 &&
+                before.text.removeRange(cursor - 1, cursor) == after.text
+            else -> false
+        }
     }
 
     private fun pushBounded(snapshot: EditorSnapshot) {
@@ -81,6 +99,8 @@ class EditorHistory(
         while (total > maxTotalChars && undoStack.size > 1) { total -= undoStack.removeFirst().text.length }
         while (total > maxTotalChars && redoStack.isNotEmpty()) { total -= redoStack.removeFirst().text.length }
     }
+
+    companion object { private const val COALESCE_MILLIS = 900L }
 }
 
 /** Non-overlapping case-insensitive matches in UTF-16 indices. Empty query -> empty list. */
