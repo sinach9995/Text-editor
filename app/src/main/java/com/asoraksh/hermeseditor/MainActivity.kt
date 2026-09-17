@@ -14,6 +14,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -235,11 +237,18 @@ class MainActivity : ComponentActivity() {
         var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
         val previewScroll = rememberScrollState()
         val previewAnchors = remember { PreviewAnchors() }
+        val previewTextAnchors = remember { PreviewTextAnchors() }
+        previewTextAnchors.onCorrection = { delta -> previewScroll.dispatchRawDelta(delta) }
         val scope = rememberCoroutineScope()
         val density = LocalDensity.current
-        val textTop = with(density) { 72.dp.toPx() }
+        val textTop = with(density) { 20.dp.toPx() }
         val previewTop = with(density) { 16.dp.toPx() }
         var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
+        var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
+        var pinching by remember { mutableStateOf(false) }
+        var pinchLineFraction by remember { mutableStateOf(0f) }
+        val cursorRequester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+        val imeBottom = WindowInsets.ime.getBottom(density)
         var viewportHeight by remember { mutableStateOf(0) }
         var editorFocused by remember { mutableStateOf(false) }
         fun sourceAnchor(screen: Offset): DocumentAnchor {
@@ -266,8 +275,8 @@ class MainActivity : ComponentActivity() {
             withFrameNanos { }
             val match = activeMatch
             val layout = textLayout
-            if (match != null && layout != null && layout.layoutInput.text.text == text) {
-                val y = layout.getBoundingBox(match.start.coerceAtMost((text.length - 1).coerceAtLeast(0))).top.toInt()
+            if (match != null && layout != null && layout.layoutInput.text.text == text && pinchAnchor == null) {
+                val y = (layout.getBoundingBox(match.start.coerceAtMost((text.length - 1).coerceAtLeast(0))).top + textTop - with(density) { 72.dp.toPx() }).toInt()
                 editorScroll.animateScrollTo(y.coerceIn(0, editorScroll.maxValue))
             }
         }
@@ -291,15 +300,58 @@ class MainActivity : ComponentActivity() {
             previewAnchors.clear()
             mdPreview = !mdPreview
         }
-        val zoomDocument: (Float, Offset) -> Unit = { factor, centroid ->
+        val startPinch: (Offset) -> Unit = { centroid ->
+            pendingAnchor = null
+            pinchAnchor = captureAnchor(centroid)
+            if (mdPreview) {
+                previewTextAnchors.capture(centroid)
+            } else {
+                textLayout?.let { layout ->
+                    val fixed = pinchAnchor!!
+                    val rect = layout.getCursorRect(fixed.offset)
+                    pinchLineFraction = ((centroid.y - fixed.screenY) / rect.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                    pinchAnchor = fixed.copy(screenY = fixed.screenY + pinchLineFraction * rect.height)
+                }
+            }
+            pinching = true
+        }
+        val zoomDocument: (Float) -> Unit = { factor ->
             val next = (fontSize * factor).coerceIn(13f, 30f)
-            if (next.isFinite() && next != fontSize) {
-                if (pendingAnchor == null) pendingAnchor = captureAnchor(centroid)
-                fontSize = next
-                prefs.edit().putFloat("document_font_size", fontSize).apply()
+            if (next.isFinite()) fontSize = next
+        }
+        val endPinch: () -> Unit = {
+            pinching = false
+            prefs.edit().putFloat("document_font_size", fontSize).apply()
+        }
+        fun restorePinch(y: Float) {
+            val anchor = pinchAnchor ?: return
+            val scroll = if (mdPreview) previewScroll else editorScroll
+            // Synchronous correction on measured geometry, not queued animations.
+            scroll.dispatchRawDelta(y - anchor.screenY - scroll.value)
+        }
+        LaunchedEffect(pinching) {
+            if (!pinching && pinchAnchor != null) {
+                withFrameNanos { }; withFrameNanos { }
+                pinchAnchor = null
+                previewTextAnchors.release()
             }
         }
-        LaunchedEffect(fontSize, mdPreview, pendingAnchor) {
+        LaunchedEffect(imeBottom, viewportHeight, editorFocused, editor.selection, pinching) {
+            if (imeBottom > 0 && editorFocused && !mdPreview && !finding && pinchAnchor == null) {
+                withFrameNanos { }
+                val layout = textLayout
+                if (layout != null && layout.layoutInput.text.text == text && pinchAnchor == null && editorFocused) {
+                    val rect = layout.getCursorRect(editor.selection.end.coerceIn(0, text.length))
+                    val margin = with(density) { 12.dp.toPx() }
+                    val visibleTop = rect.top + textTop - editorScroll.value
+                    val visibleBottom = rect.bottom + textTop - editorScroll.value
+                    if (visibleTop < margin || visibleBottom > viewportHeight - margin) {
+                        cursorRequester.bringIntoView(rect.inflate(margin))
+                    }
+                }
+            }
+        }
+        LaunchedEffect(mdPreview, pendingAnchor) {
             val anchor = pendingAnchor ?: return@LaunchedEffect
             // Wait for the new font/mode to measure and publish source/block positions.
             withFrameNanos { }; withFrameNanos { }
@@ -388,6 +440,10 @@ class MainActivity : ComponentActivity() {
                 },
                 bottomBar = {
                     Column(Modifier.navigationBarsPadding().imePadding()) {
+                    if (!finding && !mdPreview) Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterEnd) {
+                        FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
+                            { restore(history.undo(snapshot(editor))) }, { restore(history.redo(snapshot(editor))) })
+                    }
                     ActionBar(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -403,27 +459,7 @@ class MainActivity : ComponentActivity() {
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
-                Box(Modifier.fillMaxSize().padding(innerPadding).onSizeChanged { size ->
-                    val oldHeight = viewportHeight
-                    val oldScroll = editorScroll.value
-                    viewportHeight = size.height
-                    if (oldHeight > 0 && size.height != oldHeight && !mdPreview && pendingAnchor == null) {
-                        // Retain viewport first; only move enough to reveal the focused cursor.
-                        scope.launch {
-                            withFrameNanos { }
-                            var target = oldScroll
-                            if (editorFocused && size.height < oldHeight) {
-                                textLayout?.getCursorRect(editor.selection.end.coerceIn(0, text.length))?.let { rect ->
-                                    val top = rect.top + textTop
-                                    val bottom = rect.bottom + textTop
-                                    if (bottom - target > size.height - previewTop) target = (bottom - size.height + previewTop).toInt()
-                                    if (top - target < textTop) target = (top - textTop).toInt()
-                                }
-                            }
-                            editorScroll.scrollTo(target.coerceIn(0, editorScroll.maxValue))
-                        }
-                    }
-                }) {
+                Box(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding).onSizeChanged { viewportHeight = it.height }) {
                 val docDirection = if (docRtl) TextDirection.Rtl else TextDirection.Ltr
                 val docAlign = if (docRtl) TextAlign.Right else TextAlign.Left
                 if (isMarkdownName(title) && mdPreview) {
@@ -433,11 +469,26 @@ class MainActivity : ComponentActivity() {
                             onLinkClick = ::openLink,
                             fontSize = fontSize,
                             scrollState = previewScroll, anchors = previewAnchors,
-                            modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument)
+                            textAnchors = previewTextAnchors,
+                            modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
                         )
                     }
                 } else {
-                    CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboardManager provides editorClipboard) {
+                    CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalClipboardManager provides editorClipboard,
+                        androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+                            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                                // A full text-field focus request is not a cursor request.
+                                // Do not let it reset a long Markdown document, or fight a pinch.
+                                if (pinchAnchor != null || pendingAnchor != null || size > containerSize) return 0f
+                                return when {
+                                    offset < 0f -> offset
+                                    offset + size > containerSize -> offset + size - containerSize
+                                    else -> 0f
+                                }
+                            }
+                        }
+                    ) {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
@@ -457,9 +508,18 @@ class MainActivity : ComponentActivity() {
                             activeMatch = activeMatch
                         ),
                         onTextLayout = { textLayout = it },
-                        modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument)
+                        modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
                             .onFocusChanged { editorFocused = it.isFocused }
-                            .verticalScroll(editorScroll).padding(horizontal = 20.dp).padding(top = 72.dp, bottom = 16.dp),
+                            .verticalScroll(editorScroll).padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 24.dp)
+                            .bringIntoViewRequester(cursorRequester)
+                            .onGloballyPositioned {
+                                val anchor = pinchAnchor
+                                val layout = textLayout
+                                if (anchor != null && layout != null && layout.layoutInput.text.text == text) {
+                                    val rect = layout.getCursorRect(anchor.offset.coerceIn(0, text.length))
+                                    restorePinch(rect.top + pinchLineFraction * rect.height + textTop)
+                                }
+                            },
                         decorationBox = { innerTextField ->
                             if (text.isEmpty()) {
                                 Text(
@@ -480,8 +540,7 @@ class MainActivity : ComponentActivity() {
                         { if (matches.isNotEmpty()) matchIndex = (matchIndex.coerceAtMost(matches.lastIndex) - 1 + matches.size) % matches.size },
                         { if (matches.isNotEmpty()) matchIndex = (matchIndex + 1) % matches.size },
                         { finding = false; query = ""; matchIndex = 0; focusManager.clearFocus() })
-                    else if (!mdPreview) FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
-                        { restore(history.undo(snapshot(editor))) }, { restore(history.redo(snapshot(editor))) })
+
                 }
                 }
             }
@@ -615,6 +674,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable private fun CenteredActionLabel(word: String) {
+        androidx.compose.ui.layout.Layout(
+            modifier = Modifier.fillMaxSize(),
+            content = {
+                Text(word, maxLines = 1)
+                Text("▲", fontSize = 11.sp)
+            }
+        ) { measurables, constraints ->
+            val width = constraints.maxWidth
+            val height = constraints.maxHeight
+            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+            val arrow = measurables[1].measure(loose)
+            val gap = 3.dp.roundToPx()
+            val label = measurables[0].measure(loose.copy(maxWidth = (width - 2 * (arrow.width + gap)).coerceAtLeast(0)))
+            layout(width, height) {
+                label.placeRelative((width - label.width) / 2, (height - label.height) / 2)
+                arrow.placeRelative((width + label.width) / 2 + gap, (height - arrow.height) / 2 - 2.dp.roundToPx())
+            }
+        }
+    }
+
     @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onNewMarkdown: () -> Unit, onOpen: () -> Unit, onQuickSave: () -> Unit, onSaveAs: () -> Unit, onExport: () -> Unit) {
         var showSaveMenu by remember { mutableStateOf(false) }
         var showNewMenu by remember { mutableStateOf(false) }
@@ -625,11 +705,7 @@ class MainActivity : ComponentActivity() {
                         contentColor = MaterialTheme.colorScheme.primary,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClick = onNew, onLongClick = { showNewMenu = true })) {
-                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.ui_new))
-                            Spacer(Modifier.width(4.dp))
-                            Text("▲", fontSize = 11.sp, modifier = Modifier.offset(y = (-1).dp))
-                        }
+                        CenteredActionLabel(stringResource(R.string.ui_new))
                     }
                     DropdownMenu(expanded = showNewMenu, onDismissRequest = { showNewMenu = false }) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.new_txt)) }, onClick = { showNewMenu = false; onNew() })
@@ -645,11 +721,7 @@ class MainActivity : ComponentActivity() {
                         contentColor = btnColors.contentColor,
                         modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_save), onClick = onQuickSave, onLongClick = { showSaveMenu = true })
                     ) {
-                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.ui_save))
-                            Spacer(Modifier.width(4.dp))
-                            Text("▲", fontSize = 11.sp, modifier = Modifier.offset(y = (-1).dp))
-                        }
+                        CenteredActionLabel(stringResource(R.string.ui_save))
                     }
                     DropdownMenu(expanded = showSaveMenu, onDismissRequest = { showSaveMenu = false }) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.ui_save_as)) }, onClick = { showSaveMenu = false; onSaveAs() })

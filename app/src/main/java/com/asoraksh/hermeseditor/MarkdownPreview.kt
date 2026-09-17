@@ -13,6 +13,10 @@ import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,8 +106,13 @@ fun markdownToPlainText(src: String): String {
     return sb.toString().trim()
 }
 
+private val LocalPreviewTextAnchors = staticCompositionLocalOf<PreviewTextAnchors?> { null }
+
+// Keep measured layout outside snapshot state: scrolling must not recompose text.
+private class MeasuredPreviewText { var layout: TextLayoutResult? = null }
+
 @Composable
-fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f, scrollState: ScrollState = rememberScrollState(), anchors: PreviewAnchors = remember { PreviewAnchors() }) {
+fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f, scrollState: ScrollState = rememberScrollState(), anchors: PreviewAnchors = remember { PreviewAnchors() }, textAnchors: PreviewTextAnchors = remember { PreviewTextAnchors() }) {
     // Scale document typography only, not padding, controls or application chrome.
     val scale = if (fontSize.isFinite() && fontSize > 0f) fontSize / 17f else 1f
     if (markdown.isBlank()) {
@@ -112,7 +121,9 @@ fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: M
         }
     } else {
         val document = remember(markdown) { mdParser.parse(markdown) }
-        Column(modifier.verticalScroll(scrollState).padding(horizontal = 20.dp, vertical = 16.dp)) {
+        CompositionLocalProvider(LocalPreviewTextAnchors provides textAnchors) {
+        Column(modifier.onGloballyPositioned { textAnchors.viewport = it }
+            .verticalScroll(scrollState).padding(horizontal = 20.dp, vertical = 16.dp)) {
             var child = document.firstChild
             while (child != null) {
                 val block = child
@@ -123,6 +134,7 @@ fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: M
                 }) { RenderBlock(block, 0, onLinkClick, scale) }
                 child = block.next
             }
+        }
         }
     }
 }
@@ -167,8 +179,8 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit, 
             )
             Spacer(Modifier.height(8.dp))
         }
-        is FencedCodeBlock -> CodeBlock(node.literal ?: "", scale)
-        is IndentedCodeBlock -> CodeBlock(node.literal ?: "", scale)
+        is FencedCodeBlock -> CodeBlock(node, node.literal ?: "", scale)
+        is IndentedCodeBlock -> CodeBlock(node, node.literal ?: "", scale)
         is BlockQuote -> {
             Row(Modifier.padding(vertical = 4.dp).height(IntrinsicSize.Min)) {
                 Box(
@@ -268,7 +280,10 @@ private fun RenderListItem(item: ListItem, indent: Int, onLinkClick: (String) ->
 }
 
 @Composable
-private fun CodeBlock(code: String, scale: Float) {
+private fun CodeBlock(node: Node, code: String, scale: Float) {
+    val anchors = LocalPreviewTextAnchors.current
+    val measured = remember(node) { MeasuredPreviewText() }
+    DisposableEffect(node, anchors) { onDispose { anchors?.remove(node) } }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
@@ -280,7 +295,11 @@ private fun CodeBlock(code: String, scale: Float) {
             fontSize = 14.sp * scale,
             lineHeight = 20.sp * scale,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            onTextLayout = { measured.layout = it },
             modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp)
+                .onGloballyPositioned { coordinates ->
+                    measured.layout?.let { anchors?.update(node, it, coordinates) }
+                }
         )
     }
     Spacer(Modifier.height(8.dp))
@@ -291,8 +310,15 @@ private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Un
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
     val annotated = remember(node, linkColor, codeBg, scale) { inlineAnnotated(node, linkColor, codeBg, scale) }
+    val anchors = LocalPreviewTextAnchors.current
+    val measured = remember(node) { MeasuredPreviewText() }
+    DisposableEffect(node, anchors) { onDispose { anchors?.remove(node) } }
     ClickableText(
         text = annotated,
+        onTextLayout = { measured.layout = it },
+        modifier = Modifier.onGloballyPositioned { coordinates ->
+            measured.layout?.let { anchors?.update(node, it, coordinates) }
+        },
         style = style,
         onClick = { offset ->
             annotated.getStringAnnotations("md-url", offset, offset).firstOrNull()?.let { onLinkClick(it.item) }
