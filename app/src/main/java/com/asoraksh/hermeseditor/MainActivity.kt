@@ -63,6 +63,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -247,6 +251,9 @@ class MainActivity : ComponentActivity() {
         var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinching by remember { mutableStateOf(false) }
         var pinchLineFraction by remember { mutableStateOf(0f) }
+        var pinchScrollOwner by remember { mutableStateOf<Job?>(null) }
+        var lastPinchLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        var cursorVisibilityRequest by remember { mutableStateOf(false) }
         val cursorRequester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
         val imeBottom = WindowInsets.ime.getBottom(density)
         var viewportHeight by remember { mutableStateOf(0) }
@@ -302,6 +309,14 @@ class MainActivity : ComponentActivity() {
         }
         val startPinch: (Offset) -> Unit = { centroid ->
             pendingAnchor = null
+            pinchScrollOwner?.cancel()
+            cursorVisibilityRequest = false
+            // Cancel an existing fling/Find/BIV animation before capturing geometry.
+            val scroll = if (mdPreview) previewScroll else editorScroll
+            pinchScrollOwner = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                scroll.scroll(MutatePriority.PreventUserInput) { awaitCancellation() }
+            }
+            lastPinchLayout = textLayout
             pinchAnchor = captureAnchor(centroid)
             if (mdPreview) {
                 previewTextAnchors.capture(centroid)
@@ -334,9 +349,11 @@ class MainActivity : ComponentActivity() {
                 withFrameNanos { }; withFrameNanos { }
                 pinchAnchor = null
                 previewTextAnchors.release()
+                pinchScrollOwner?.cancel()
+                pinchScrollOwner = null
             }
         }
-        LaunchedEffect(imeBottom, viewportHeight, editorFocused, editor.selection, pinching) {
+        LaunchedEffect(imeBottom, viewportHeight, editorFocused, editor.selection, text, pinching) {
             if (imeBottom > 0 && editorFocused && !mdPreview && !finding && pinchAnchor == null) {
                 withFrameNanos { }
                 val layout = textLayout
@@ -346,7 +363,12 @@ class MainActivity : ComponentActivity() {
                     val visibleTop = rect.top + textTop - editorScroll.value
                     val visibleBottom = rect.bottom + textTop - editorScroll.value
                     if (visibleTop < margin || visibleBottom > viewportHeight - margin) {
-                        cursorRequester.bringIntoView(rect.inflate(margin))
+                        cursorVisibilityRequest = true
+                        try {
+                            cursorRequester.bringIntoView(rect.inflate(margin))
+                        } finally {
+                            cursorVisibilityRequest = false
+                        }
                     }
                 }
             }
@@ -440,10 +462,6 @@ class MainActivity : ComponentActivity() {
                 },
                 bottomBar = {
                     Column(Modifier.navigationBarsPadding().imePadding()) {
-                    if (!finding && !mdPreview) Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterEnd) {
-                        FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
-                            { restore(history.undo(snapshot(editor))) }, { restore(history.redo(snapshot(editor))) })
-                    }
                     ActionBar(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -478,17 +496,24 @@ class MainActivity : ComponentActivity() {
                         androidx.compose.ui.platform.LocalClipboardManager provides editorClipboard,
                         androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides object : androidx.compose.foundation.gestures.BringIntoViewSpec {
                             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-                                // A full text-field focus request is not a cursor request.
-                                // Do not let it reset a long Markdown document, or fight a pinch.
-                                if (pinchAnchor != null || pendingAnchor != null || size > containerSize) return 0f
+                                // CoreTextField focus can request the OLD selection before
+                                // the tap updates it. Only our settled cursor request may scroll.
+                                if (!cursorVisibilityRequest || !editorFocused || pinchAnchor != null || pendingAnchor != null) return 0f
+                                val layout = textLayout ?: return 0f
+                                val cursor = layout.getCursorRect(editor.selection.end.coerceIn(0, text.length))
+                                val margin = with(density) { 12.dp.toPx() }
+                                val top = cursor.top + textTop - editorScroll.value - margin
+                                val bottom = cursor.bottom + textTop - editorScroll.value + margin
                                 return when {
-                                    offset < 0f -> offset
-                                    offset + size > containerSize -> offset + size - containerSize
+                                    top < 0f -> top
+                                    bottom > containerSize -> bottom - containerSize
                                     else -> 0f
                                 }
                             }
                         }
                     ) {
+                    Box(Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
+                        .verticalScroll(editorScroll).padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 24.dp)) {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
@@ -508,14 +533,14 @@ class MainActivity : ComponentActivity() {
                             activeMatch = activeMatch
                         ),
                         onTextLayout = { textLayout = it },
-                        modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
+                        modifier = Modifier.fillMaxWidth()
                             .onFocusChanged { editorFocused = it.isFocused }
-                            .verticalScroll(editorScroll).padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 24.dp)
                             .bringIntoViewRequester(cursorRequester)
                             .onGloballyPositioned {
                                 val anchor = pinchAnchor
                                 val layout = textLayout
-                                if (anchor != null && layout != null && layout.layoutInput.text.text == text) {
+                                if (anchor != null && layout != null && layout.layoutInput.text.text == text && lastPinchLayout !== layout) {
+                                    lastPinchLayout = layout
                                     val rect = layout.getCursorRect(anchor.offset.coerceIn(0, text.length))
                                     restorePinch(rect.top + pinchLineFraction * rect.height + textTop)
                                 }
@@ -532,6 +557,13 @@ class MainActivity : ComponentActivity() {
                             innerTextField()
                         }
                     )
+                    }
+                    }
+                }
+                if (!finding && !mdPreview) {
+                    Box(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 4.dp)) {
+                        FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
+                            { restore(history.undo(snapshot(editor))) }, { restore(history.redo(snapshot(editor))) })
                     }
                 }
                 Box(Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp, vertical = 8.dp)) {

@@ -12,6 +12,7 @@ class PreviewTextAnchors {
     var viewport: LayoutCoordinates? = null
     var onCorrection: (Float) -> Unit = {}
     private var anchor: Anchor? = null
+    private var correctedLayout: TextLayoutResult? = null
 
     fun remove(key: Any) { entries.remove(key) }
     fun release() { anchor = null }
@@ -33,6 +34,7 @@ class PreviewTextAnchors {
         val rect = layout.getCursorRect(offset)
         val fraction = ((local.y - rect.top) / rect.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
         val origin = parent.localPositionOf(entry.value.coordinates, Offset.Zero)
+        correctedLayout = layout
         anchor = Anchor(entry.key, offset, fraction, origin.y + rect.top + fraction * rect.height)
         return true
     }
@@ -40,7 +42,10 @@ class PreviewTextAnchors {
         entries[key] = Entry(layout, coordinates)
         val fixed = anchor ?: return
         val parent = viewport?.takeIf { it.isAttached } ?: return
-        if (key != fixed.key || !coordinates.isAttached) return
+        if (key != fixed.key || !coordinates.isAttached || correctedLayout === layout) return
+        // A scroll-only placement must not feed the same geometry back into the
+        // controller. Correct once for each new measured typography layout.
+        correctedLayout = layout
         val rect = layout.getCursorRect(fixed.offset.coerceIn(0, layout.layoutInput.text.length))
         val origin = parent.localPositionOf(coordinates, Offset.Zero)
         onCorrection(origin.y + rect.top + fixed.lineFraction * rect.height - fixed.screenY)

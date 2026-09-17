@@ -21,6 +21,18 @@ class ViewportFollowup(unittest.TestCase):
         self.assertIn('onTextLayout =', text)
         main = (ROOT / 'MainActivity.kt').read_text()
         self.assertIn('previewTextAnchors.capture(centroid)', main)
+    def test_history_is_overlay_not_bottom_bar_child(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        bar = text.split('bottomBar = {', 1)[1].split('contentWindowInsets', 1)[0]
+        self.assertNotIn('FloatingHistory(', bar)
+        self.assertIn('Modifier.align(Alignment.BottomEnd)', text)
+    def test_pinch_has_exclusive_scroll_ownership(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        self.assertIn('MutatePriority.PreventUserInput', text)
+        self.assertIn('lastPinchLayout !== layout', text)
+        self.assertIn('cursorVisibilityRequest', text)
+        preview = (ROOT / 'PreviewTextAnchors.kt').read_text()
+        self.assertIn('correctedLayout === layout', preview)
     def test_word_centered_independently(self):
         text = (ROOT / 'MainActivity.kt').read_text()
         self.assertEqual(text.count('CenteredActionLabel(stringResource('), 2)
