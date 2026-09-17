@@ -52,6 +52,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import java.util.Locale
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.launch
 
 private enum class AppTheme { DARK, LIGHT }
 
@@ -60,6 +69,8 @@ class MainActivity : ComponentActivity() {
     private var documentUri: Uri? = null
     private var updateEditor: ((String, String, Boolean) -> Unit)? = null
     private var pendingDocument: Pair<String, String>? = null
+    private val messages = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private fun notifyMessage(message: String) { messages.trySend(message) }
 
     override fun attachBaseContext(newBase: Context) {
         val lang = newBase.getSharedPreferences("hermes_editor", Context.MODE_PRIVATE).getString("lang", "en") ?: "en"
@@ -93,8 +104,9 @@ class MainActivity : ComponentActivity() {
         uri?.let {
             try {
                 val plain = markdownToPlainText(prefs.getString("draft", "") ?: "")
-                contentResolver.openOutputStream(it, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { w -> w.write(plain) }
-            } catch (_: Exception) { }
+                requireNotNull(contentResolver.openOutputStream(it, "wt")).bufferedWriter(Charsets.UTF_8).use { w -> w.write(plain) }
+                notifyMessage(getString(R.string.exported, displayName(it)))
+            } catch (_: Exception) { notifyMessage(getString(R.string.save_failed)) }
         }
     }
 
@@ -124,18 +136,20 @@ class MainActivity : ComponentActivity() {
     private fun saveToUri(uri: Uri) {
         val draft = prefs.getString("draft", "") ?: ""
         try {
-            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) }
+            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) } ?: throw IllegalStateException("unwritable")
             documentUri = uri
             updateEditor?.invoke(draft, displayName(uri), false)
-        } catch (_: Exception) { updateEditor?.invoke(draft, msg("Could not save file", "فایل ذخیره نشد"), false) }
+            notifyMessage(getString(R.string.saved, displayName(uri)))
+        } catch (_: Exception) { notifyMessage(getString(R.string.save_failed)) }
     }
     private fun saveAsToUri(uri: Uri) {
         val draft = prefs.getString("draft", "") ?: ""
         try {
-            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) }
+            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) } ?: throw IllegalStateException("unwritable")
             documentUri = uri
-            updateEditor?.invoke(draft, displayName(uri), true)
-        } catch (_: Exception) { updateEditor?.invoke(draft, msg("Could not save file", "فایل ذخیره نشد"), true) }
+            updateEditor?.invoke(draft, displayName(uri), false)
+            notifyMessage(getString(R.string.saved_copy, displayName(uri)))
+        } catch (_: Exception) { notifyMessage(getString(R.string.save_failed)) }
     }
     private fun cacheDraft(text: String? = null) { prefs.edit().putString("draft", text ?: prefs.getString("draft", "") ?: "").apply() }
     private fun baseName(title: String) = title.substringBeforeLast('.', title).ifBlank { "document" }
@@ -189,7 +203,41 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun HermesEditor() {
-        var text by rememberSaveable { mutableStateOf(prefs.getString("draft", "") ?: "") }
+        var editor by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(prefs.getString("draft", "") ?: "")) }
+        val text = editor.text
+        val history = remember { EditorHistory() }
+        var historyTick by remember { mutableStateOf(0) }
+        val snackbar = remember { SnackbarHostState() }
+        val scope = rememberCoroutineScope()
+        var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
+        var finding by rememberSaveable { mutableStateOf(false) }
+        var query by rememberSaveable { mutableStateOf("") }
+        var matchIndex by remember { mutableStateOf(0) }
+        val matches = remember(text, query) { findMatches(text, query) }
+        val activeMatch = if (finding) matches.getOrNull(matchIndex.coerceAtMost((matches.size - 1).coerceAtLeast(0)))?.let { TextRange(it.first, it.last + 1) } else null
+        val editorScroll = rememberScrollState()
+        var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        fun snapshot(value: TextFieldValue) = EditorSnapshot(value.text, value.selection.start, value.selection.end)
+        fun restore(value: EditorSnapshot?) {
+            if (value != null) { editor = TextFieldValue(value.text, TextRange(value.start, value.end)); cacheDraft(value.text); historyTick++ }
+        }
+        LaunchedEffect(Unit) { for (message in messages) { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(message, duration = SnackbarDuration.Short) } }
+        LaunchedEffect(Unit) {
+            for ((key, resource) in listOf("zoom_hint_seen" to R.string.zoom_hint, "save_hint_seen" to R.string.save_hint)) {
+                if (!prefs.getBoolean(key, false)) {
+                    prefs.edit().putBoolean(key, true).apply()
+                    snackbar.showSnackbar(getString(resource), duration = SnackbarDuration.Short)
+                }
+            }
+        }
+        LaunchedEffect(activeMatch, textLayout) {
+            val match = activeMatch
+            val layout = textLayout
+            if (match != null && layout != null && layout.layoutInput.text.text == text) {
+                val y = layout.getBoundingBox(match.start.coerceAtMost((text.length - 1).coerceAtLeast(0))).top.toInt()
+                editorScroll.animateScrollTo(y.coerceIn(0, editorScroll.maxValue))
+            }
+        }
         var title by rememberSaveable { mutableStateOf("untitled.txt") }
         var selectedTheme by rememberSaveable { mutableStateOf(if (prefs.getString("theme", "dark") == "light") AppTheme.LIGHT else AppTheme.DARK) }
         var lang by rememberSaveable { mutableStateOf(prefs.getString("lang", "en") ?: "en") }
@@ -206,8 +254,14 @@ class MainActivity : ComponentActivity() {
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
         fun update(newText: String, newTitle: String, newSession: Boolean) {
-            text = newText; title = newTitle; mdPreview = isMarkdownName(newTitle); cacheDraft(newText)
-            if (newSession) dirSession++
+            title = newTitle; cacheDraft(newText)
+            if (newSession) {
+                editor = TextFieldValue(newText)
+                history.reset(snapshot(editor)); historyTick++
+                finding = false; query = ""; matchIndex = 0
+                mdPreview = isMarkdownName(newTitle)
+                dirSession++
+            }
         }
         fun setLang(code: String) {
             if (code == lang) return
@@ -241,6 +295,7 @@ class MainActivity : ComponentActivity() {
             BackHandler { cacheDraft(text); finish() }
             Scaffold(
                 containerColor = colors.background,
+                snackbarHost = { SnackbarHost(snackbar) },
                 topBar = {
                     TopBar(
                         title = title,
@@ -253,10 +308,16 @@ class MainActivity : ComponentActivity() {
                         previewing = mdPreview,
                         onTogglePreview = { mdPreview = !mdPreview },
                         onDirRequest = { showDirMenu = true },
-                        onHelpRequest = { showHelp = true }
+                        onHelpRequest = { showHelp = true },
+                        onFind = { finding = true; mdPreview = false }
                     )
                 },
                 bottomBar = {
+                    Column(Modifier.navigationBarsPadding().imePadding()) {
+                    if (!mdPreview) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        TextButton(onClick = { restore(history.undo(snapshot(editor))) }, enabled = historyTick >= 0 && history.canUndo) { Text(stringResource(R.string.undo)) }
+                        TextButton(onClick = { restore(history.redo(snapshot(editor))) }, enabled = historyTick >= 0 && history.canRedo) { Text(stringResource(R.string.redo)) }
+                    }
                     ActionBar(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -269,6 +330,7 @@ class MainActivity : ComponentActivity() {
                         onSaveAs = { showFormatChoice = true },
                         onExport = { exportDocument.launch(baseName(title) + ".txt") }
                     )
+                    }
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
@@ -279,21 +341,36 @@ class MainActivity : ComponentActivity() {
                         MarkdownPreview(
                             markdown = text,
                             onLinkClick = ::openLink,
+                            fontSize = fontSize,
                             modifier = Modifier.fillMaxSize().padding(innerPadding)
                         )
                     }
                 } else {
                     BasicTextField(
-                        value = text,
-                        onValueChange = { text = it; cacheDraft(it) },
-                        textStyle = TextStyle(color = colors.onBackground, fontSize = 17.sp, lineHeight = 26.sp, textDirection = docDirection, textAlign = docAlign),
-                        modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(rememberScrollState()),
+                        value = editor,
+                        onValueChange = { newValue ->
+                            history.record(snapshot(editor), snapshot(newValue), System.currentTimeMillis())
+                            editor = newValue
+                            cacheDraft(newValue.text)
+                            if (finding && matches.isNotEmpty() && newValue.text != text) matchIndex = 0
+                        },
+                        textStyle = TextStyle(color = colors.onBackground, fontSize = fontSize.sp, lineHeight = (fontSize * 1.5f).sp, textDirection = docDirection, textAlign = docAlign),
+                        cursorBrush = SolidColor(colors.primary),
+                        visualTransformation = MarkdownSourceTransformation(
+                            linkColor = colors.primary,
+                            codeBg = colors.surfaceVariant,
+                            baseFontSize = fontSize.sp,
+                            markdown = isMarkdownName(title),
+                            activeMatch = activeMatch
+                        ),
+                        onTextLayout = { textLayout = it },
+                        modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(editorScroll),
                         decorationBox = { innerTextField ->
                             if (text.isEmpty()) {
                                 Text(
                                     stringResource(R.string.hint),
                                     color = colors.onSurfaceVariant,
-                                    fontSize = 17.sp,
+                                    fontSize = fontSize.sp,
                                     textAlign = docAlign
                                 )
                             }
@@ -371,13 +448,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit) {
+    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(72.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text("Hermes Text Editor", fontSize = 20.sp, fontWeight = FontWeight.SemiBold); Text(title, maxLines = 1, modifier = Modifier.horizontalScroll(rememberScrollState()), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
+            Column(Modifier.weight(1f)) { Text("Hermes Text Editor", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(title, maxLines = 1, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState()), color = MaterialTheme.colorScheme.onSurface, fontSize = 19.sp, fontWeight = FontWeight.SemiBold) }
             Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(if (theme == AppTheme.DARK) R.string.theme_to_light else R.string.theme_to_dark)) },
@@ -391,13 +468,14 @@ class MainActivity : ComponentActivity() {
                 )
                 DropdownMenuItem(text = { Text(stringResource(R.string.dir_menu)) }, onClick = { onDirRequest(); expanded = false })
                 if (isMarkdown) DropdownMenuItem({ Text(stringResource(if (previewing) R.string.edit_md else R.string.preview_md)) }, onClick = { onTogglePreview(); expanded = false })
+                DropdownMenuItem({ Text(stringResource(R.string.find)) }, onClick = { onFind(); expanded = false })
                 DropdownMenuItem({ Text(stringResource(R.string.discard)) }, onClick = { onDiscardRequest(); expanded = false })
                 DropdownMenuItem({ Text(stringResource(R.string.help)) }, onClick = { onHelpRequest(); expanded = false })
                 DropdownMenuItem({ Text(stringResource(R.string.about)) }, onClick = { about = true; expanded = false })
             } }
         } }
         if (about) {
-            val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.1" } catch (_: Exception) { "1.1" }
+            val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2" } catch (_: Exception) { "1.2" }
             AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Text Editor") }, text = { Text(stringResource(R.string.about_body, version)) }, confirmButton = { TextButton(onClick = { about = false }) { Text(stringResource(R.string.close)) } })
         }
     }

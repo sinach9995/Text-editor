@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="preview_empty">چیزی برای پیش‌نمایش وجود ندارد.</string>
     <string name="ui_new">جدید</string>
     <string name="ui_open">باز کردن</string>
     <string name="ui_save">ذخیره</string>
@@ -66,4 +67,18 @@
         <item>در پیش‌نمایش Markdown، با لمس یک پیوند وب آن را در مرورگر باز کنید. فقط پیوندهای عادی http و https باید باز شوند.</item>
         <item>Hermes Text Editor برای کار آفلاین طراحی شده است. این برنامه تبلیغ، تحلیل‌گر، ردیابی یا WebView ندارد. فایل‌های شما روی دستگاه می‌مانند؛ مگر زمانی که خودتان از انتخاب‌گر فایل اندروید برای باز کردن یا ذخیره‌کردن استفاده کنید.</item>
     </string-array>
+    <string name="saved">ذخیره شد: %1$s</string>
+    <string name="saved_copy">نسخهٔ کپی ذخیره شد: %1$s</string>
+    <string name="exported">خروجی ساخته شد: %1$s</string>
+    <string name="save_failed">این فایل ذخیره نشد. برای ساختن یک کپی، از ذخیره با نام دیگر… استفاده کنید.</string>
+    <string name="undo">واگرد</string>
+    <string name="redo">ازنو</string>
+    <string name="find">یافتن</string>
+    <string name="find_query">واژه یا عبارت</string>
+    <string name="match_count">%1$d از %2$d</string>
+    <string name="no_matches">موردی پیدا نشد</string>
+    <string name="previous_match">نتیجهٔ قبلی</string>
+    <string name="next_match">نتیجهٔ بعدی</string>
+    <string name="zoom_hint">برای بزرگ یا کوچک کردن متن، با دو انگشت زوم کنید.</string>
+    <string name="save_hint">برای ذخیره با نام دیگر و خروجی، دکمه ذخیره ▲ را نگه دارید.</string>
 </resources>

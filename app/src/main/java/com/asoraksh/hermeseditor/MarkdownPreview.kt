@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -97,25 +98,27 @@ fun markdownToPlainText(src: String): String {
 }
 
 @Composable
-fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier) {
+fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f) {
+    // Scale document typography only, not padding, controls or application chrome.
+    val scale = if (fontSize.isFinite() && fontSize > 0f) fontSize / 17f else 1f
     if (markdown.isBlank()) {
         Box(modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-            Text("Nothing to preview.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
+            Text(stringResource(R.string.preview_empty), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp * scale)
         }
     } else {
         val document = remember(markdown) { mdParser.parse(markdown) }
         Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp)) {
-            RenderBlocks(document, 0, onLinkClick)
+            RenderBlocks(document, 0, onLinkClick, scale)
         }
     }
 }
 
 @Composable
-private fun RenderBlocks(parent: Node, indent: Int, onLinkClick: (String) -> Unit) {
+private fun RenderBlocks(parent: Node, indent: Int, onLinkClick: (String) -> Unit, scale: Float) {
     var child: Node? = parent.firstChild
     while (child != null) {
         val current = child
-        RenderBlock(current, indent, onLinkClick)
+        RenderBlock(current, indent, onLinkClick, scale)
         child = current.next
     }
 }
@@ -123,7 +126,7 @@ private fun RenderBlocks(parent: Node, indent: Int, onLinkClick: (String) -> Uni
 private data class HeadingStyle(val size: TextUnit, val weight: FontWeight, val topPad: Dp)
 
 @Composable
-private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit) {
+private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit, scale: Float) {
     val bodyColor = MaterialTheme.colorScheme.onBackground
     when (node) {
         is Heading -> {
@@ -135,21 +138,23 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit) 
             Spacer(Modifier.height(style.topPad))
             LinkedText(
                 node = node,
-                style = TextStyle(fontSize = style.size, fontWeight = style.weight, lineHeight = style.size * 1.25f, color = bodyColor),
-                onLinkClick = onLinkClick
+                style = TextStyle(fontSize = style.size * scale, fontWeight = style.weight, lineHeight = style.size * 1.25f * scale, color = bodyColor),
+                onLinkClick = onLinkClick,
+                scale = scale
             )
             Spacer(Modifier.height(6.dp))
         }
         is Paragraph -> {
             LinkedText(
                 node = node,
-                style = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, color = bodyColor),
-                onLinkClick = onLinkClick
+                style = TextStyle(fontSize = 16.sp * scale, lineHeight = 24.sp * scale, color = bodyColor),
+                onLinkClick = onLinkClick,
+                scale = scale
             )
             Spacer(Modifier.height(8.dp))
         }
-        is FencedCodeBlock -> CodeBlock(node.literal ?: "")
-        is IndentedCodeBlock -> CodeBlock(node.literal ?: "")
+        is FencedCodeBlock -> CodeBlock(node.literal ?: "", scale)
+        is IndentedCodeBlock -> CodeBlock(node.literal ?: "", scale)
         is BlockQuote -> {
             Row(Modifier.padding(vertical = 4.dp).height(IntrinsicSize.Min)) {
                 Box(
@@ -160,7 +165,7 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit) 
                         .background(MaterialTheme.colorScheme.primary)
                 )
                 Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) { RenderBlocks(node, indent, onLinkClick) }
+                Column(Modifier.weight(1f)) { RenderBlocks(node, indent, onLinkClick, scale) }
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -169,12 +174,12 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit) 
             while (item != null) {
                 val current = item
                 if (current is ListItem) {
-                    RenderListItem(current, indent, onLinkClick) {
+                    RenderListItem(current, indent, onLinkClick, scale) {
                         val marker = findTaskMarker(current)
                         if (marker != null) {
                             Checkbox(checked = marker.isChecked, onCheckedChange = null, enabled = false, modifier = Modifier.size(22.dp))
                         } else {
-                            Text("•", fontSize = 16.sp, color = bodyColor)
+                            Text("•", fontSize = 16.sp * scale, color = bodyColor)
                         }
                     }
                 }
@@ -189,12 +194,12 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit) 
                 val current = item
                 if (current is ListItem) {
                     val n = number
-                    RenderListItem(current, indent, onLinkClick) {
+                    RenderListItem(current, indent, onLinkClick, scale) {
                         val marker = findTaskMarker(current)
                         if (marker != null) {
                             Checkbox(checked = marker.isChecked, onCheckedChange = null, enabled = false, modifier = Modifier.size(22.dp))
                         } else {
-                            Text("$n.", fontSize = 16.sp, color = bodyColor)
+                            Text("$n.", fontSize = 16.sp * scale, color = bodyColor)
                         }
                     }
                     number++
@@ -210,7 +215,7 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit) 
         }
         else -> {
             // HtmlBlock and anything unknown: render children only, never raw HTML.
-            RenderBlocks(node, indent, onLinkClick)
+            RenderBlocks(node, indent, onLinkClick, scale)
         }
     }
 }
@@ -234,14 +239,14 @@ private fun findTaskMarker(item: ListItem): TaskListItemMarker? {
 }
 
 @Composable
-private fun RenderListItem(item: ListItem, indent: Int, onLinkClick: (String) -> Unit, marker: @Composable () -> Unit) {
+private fun RenderListItem(item: ListItem, indent: Int, onLinkClick: (String) -> Unit, scale: Float, marker: @Composable () -> Unit) {
     Row(Modifier.padding(start = (indent * 16).dp).padding(vertical = 3.dp)) {
-        Box(Modifier.width(30.dp), contentAlignment = Alignment.TopStart) { marker() }
+        Box(Modifier.width((30f * scale.coerceAtLeast(1f)).dp), contentAlignment = Alignment.TopStart) { marker() }
         Column(Modifier.weight(1f)) {
             var child: Node? = item.firstChild
             while (child != null) {
                 val current = child
-                if (current !is TaskListItemMarker) RenderBlock(current, indent + 1, onLinkClick)
+                if (current !is TaskListItemMarker) RenderBlock(current, indent + 1, onLinkClick, scale)
                 child = current.next
             }
         }
@@ -249,7 +254,7 @@ private fun RenderListItem(item: ListItem, indent: Int, onLinkClick: (String) ->
 }
 
 @Composable
-private fun CodeBlock(code: String) {
+private fun CodeBlock(code: String, scale: Float) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
@@ -258,8 +263,8 @@ private fun CodeBlock(code: String) {
         Text(
             text = code.trimEnd('\n'),
             fontFamily = FontFamily.Monospace,
-            fontSize = 14.sp,
-            lineHeight = 20.sp,
+            fontSize = 14.sp * scale,
+            lineHeight = 20.sp * scale,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp)
         )
@@ -268,10 +273,10 @@ private fun CodeBlock(code: String) {
 }
 
 @Composable
-private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Unit) {
+private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Unit, scale: Float) {
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
-    val annotated = remember(node, linkColor, codeBg) { inlineAnnotated(node, linkColor, codeBg) }
+    val annotated = remember(node, linkColor, codeBg, scale) { inlineAnnotated(node, linkColor, codeBg, scale) }
     ClickableText(
         text = annotated,
         style = style,
@@ -281,38 +286,38 @@ private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Un
     )
 }
 
-private fun inlineAnnotated(node: Node, linkColor: Color, codeBg: Color): AnnotatedString {
+private fun inlineAnnotated(node: Node, linkColor: Color, codeBg: Color, scale: Float): AnnotatedString {
     val builder = AnnotatedString.Builder()
-    appendInline(node, builder, linkColor, codeBg)
+    appendInline(node, builder, linkColor, codeBg, scale)
     return builder.toAnnotatedString()
 }
 
-private fun appendInline(node: Node, b: AnnotatedString.Builder, linkColor: Color, codeBg: Color) {
+private fun appendInline(node: Node, b: AnnotatedString.Builder, linkColor: Color, codeBg: Color, scale: Float) {
     var child: Node? = node.firstChild
     while (child != null) {
         val current = child
         when (current) {
             is Text -> b.append(current.literal)
-            is Emphasis -> span(b, SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(current, b, linkColor, codeBg) }
-            is StrongEmphasis -> span(b, SpanStyle(fontWeight = FontWeight.Bold)) { appendInline(current, b, linkColor, codeBg) }
-            is Strikethrough -> span(b, SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(current, b, linkColor, codeBg) }
-            is Code -> span(b, SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 15.sp)) { b.append(current.literal) }
+            is Emphasis -> span(b, SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(current, b, linkColor, codeBg, scale) }
+            is StrongEmphasis -> span(b, SpanStyle(fontWeight = FontWeight.Bold)) { appendInline(current, b, linkColor, codeBg, scale) }
+            is Strikethrough -> span(b, SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(current, b, linkColor, codeBg, scale) }
+            is Code -> span(b, SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 15.sp * scale)) { b.append(current.literal) }
             is Link -> {
                 val url = current.destination
                 val start = b.length
                 span(b, SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) {
-                    appendInline(current, b, linkColor, codeBg)
+                    appendInline(current, b, linkColor, codeBg, scale)
                 }
                 b.addStringAnnotation("md-url", url, start, b.length)
             }
             is Image -> {
                 b.append("[")
-                appendInline(current, b, linkColor, codeBg)
+                appendInline(current, b, linkColor, codeBg, scale)
                 b.append("]")
             }
             is SoftLineBreak -> b.append(" ")
             is HardLineBreak -> b.append("\n")
-            else -> appendInline(current, b, linkColor, codeBg)
+            else -> appendInline(current, b, linkColor, codeBg, scale)
         }
         child = current.next
     }

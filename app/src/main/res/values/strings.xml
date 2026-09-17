@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="preview_empty">Nothing to preview.</string>
     <string name="ui_new">New</string>
     <string name="ui_open">Open</string>
     <string name="ui_save">Save</string>
@@ -66,4 +67,18 @@
         <item>In Markdown Preview, tap a web link to open it in your browser. Only normal http and https links should be opened.</item>
         <item>Hermes Text Editor is designed to work offline. It does not include ads, analytics, tracking, or a WebView. Your files stay on your device except when you choose to open or save them through Android\'s file picker.</item>
     </string-array>
+    <string name="saved">Saved: %1$s</string>
+    <string name="saved_copy">Saved copy: %1$s</string>
+    <string name="exported">Exported: %1$s</string>
+    <string name="save_failed">Could not save this file. Use Save as… to create a copy.</string>
+    <string name="undo">Undo</string>
+    <string name="redo">Redo</string>
+    <string name="find">Find</string>
+    <string name="find_query">Word or phrase</string>
+    <string name="match_count">%1$d of %2$d</string>
+    <string name="no_matches">No matches</string>
+    <string name="previous_match">Previous match</string>
+    <string name="next_match">Next match</string>
+    <string name="zoom_hint">Use two fingers to zoom text in or out.</string>
+    <string name="save_hint">Hold Save ▲ for Save as and Export.</string>
 </resources>
