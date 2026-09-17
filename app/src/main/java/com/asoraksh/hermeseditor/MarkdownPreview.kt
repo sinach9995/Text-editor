@@ -271,7 +271,7 @@ private fun CodeBlock(code: String) {
 private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Unit) {
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
-    val annotated = remember(node) { inlineAnnotated(node, linkColor, codeBg) }
+    val annotated = remember(node, linkColor, codeBg) { inlineAnnotated(node, linkColor, codeBg) }
     ClickableText(
         text = annotated,
         style = style,
