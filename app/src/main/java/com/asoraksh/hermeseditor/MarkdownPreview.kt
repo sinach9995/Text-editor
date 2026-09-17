@@ -1,5 +1,9 @@
 package com.asoraksh.hermeseditor
 
+import androidx.compose.foundation.ScrollState
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import org.commonmark.parser.IncludeSourceSpans
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -55,6 +59,7 @@ import org.commonmark.parser.Parser
 
 private val mdParser: Parser = Parser.builder()
     .extensions(listOf(StrikethroughExtension.create(), TaskListItemsExtension.create()))
+    .includeSourceSpans(IncludeSourceSpans.BLOCKS)
     .build()
 
 // Local Markdown-to-plain-text export. Drops formatting syntax, keeps readable
@@ -98,7 +103,7 @@ fun markdownToPlainText(src: String): String {
 }
 
 @Composable
-fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f) {
+fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f, scrollState: ScrollState = rememberScrollState(), anchors: PreviewAnchors = remember { PreviewAnchors() }) {
     // Scale document typography only, not padding, controls or application chrome.
     val scale = if (fontSize.isFinite() && fontSize > 0f) fontSize / 17f else 1f
     if (markdown.isBlank()) {
@@ -107,8 +112,17 @@ fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: M
         }
     } else {
         val document = remember(markdown) { mdParser.parse(markdown) }
-        Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp)) {
-            RenderBlocks(document, 0, onLinkClick, scale)
+        Column(modifier.verticalScroll(scrollState).padding(horizontal = 20.dp, vertical = 16.dp)) {
+            var child = document.firstChild
+            while (child != null) {
+                val block = child
+                val start = block.sourceSpans.firstOrNull()?.inputIndex ?: 0
+                val end = block.sourceSpans.lastOrNull()?.let { it.inputIndex + it.length } ?: start
+                Column(Modifier.fillMaxWidth().onGloballyPositioned {
+                    anchors.update(PreviewBlock(start, end, it.positionInParent().y, it.size.height.toFloat()))
+                }) { RenderBlock(block, 0, onLinkClick, scale) }
+                child = block.next
+            }
         }
     }
 }

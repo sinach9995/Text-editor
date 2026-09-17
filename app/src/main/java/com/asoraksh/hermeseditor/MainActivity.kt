@@ -61,6 +61,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
 
 private enum class AppTheme { DARK, LIGHT }
 
@@ -223,12 +226,6 @@ class MainActivity : ComponentActivity() {
         val snackbar = remember { SnackbarHostState() }
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
-        val zoomDocument: (Float) -> Unit = { factor ->
-            if (factor.isFinite() && factor > 0f) {
-                fontSize = (fontSize * factor).coerceIn(13f, 30f)
-                prefs.edit().putFloat("document_font_size", fontSize).apply()
-            }
-        }
         var finding by rememberSaveable { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
         var matchIndex by remember { mutableStateOf(0) }
@@ -236,6 +233,22 @@ class MainActivity : ComponentActivity() {
         val activeMatch = if (finding) matches.getOrNull(matchIndex.coerceAtMost((matches.size - 1).coerceAtLeast(0)))?.let { TextRange(it.first, it.last + 1) } else null
         val editorScroll = rememberScrollState()
         var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        val previewScroll = rememberScrollState()
+        val previewAnchors = remember { PreviewAnchors() }
+        val scope = rememberCoroutineScope()
+        val density = LocalDensity.current
+        val textTop = with(density) { 72.dp.toPx() }
+        val previewTop = with(density) { 16.dp.toPx() }
+        var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
+        var viewportHeight by remember { mutableStateOf(0) }
+        var editorFocused by remember { mutableStateOf(false) }
+        fun sourceAnchor(screen: Offset): DocumentAnchor {
+            val layout = textLayout ?: return DocumentAnchor(0, screen.y)
+            val offset = layout.getOffsetForPosition(Offset(screen.x - with(density) { 20.dp.toPx() }, editorScroll.value + screen.y - textTop))
+            val y = layout.getCursorRect(offset).top + textTop - editorScroll.value
+            return DocumentAnchor(offset, y)
+        }
+
         fun snapshot(value: TextFieldValue) = EditorSnapshot(value.text, value.selection.start, value.selection.end)
         fun restore(value: EditorSnapshot?) {
             if (value != null) { editor = TextFieldValue(value.text, TextRange(value.start, value.end)); cacheDraft(value.text); historyTick++ }
@@ -249,7 +262,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        LaunchedEffect(activeMatch, textLayout) {
+        LaunchedEffect(activeMatch) {
+            withFrameNanos { }
             val match = activeMatch
             val layout = textLayout
             if (match != null && layout != null && layout.layoutInput.text.text == text) {
@@ -269,6 +283,34 @@ class MainActivity : ComponentActivity() {
         var dirSession by remember { mutableStateOf(0) }
         var docRtl by rememberSaveable { mutableStateOf(false) }
         var mdPreview by rememberSaveable { mutableStateOf(false) }
+        fun captureAnchor(screen: Offset): DocumentAnchor = if (mdPreview)
+            previewAnchors.capture(previewScroll.value + screen.y - previewTop, screen.y)
+        else sourceAnchor(screen)
+        fun switchMode() {
+            pendingAnchor = captureAnchor(Offset(0f, textTop))
+            previewAnchors.clear()
+            mdPreview = !mdPreview
+        }
+        val zoomDocument: (Float, Offset) -> Unit = { factor, centroid ->
+            val next = (fontSize * factor).coerceIn(13f, 30f)
+            if (next.isFinite() && next != fontSize) {
+                if (pendingAnchor == null) pendingAnchor = captureAnchor(centroid)
+                fontSize = next
+                prefs.edit().putFloat("document_font_size", fontSize).apply()
+            }
+        }
+        LaunchedEffect(fontSize, mdPreview, pendingAnchor) {
+            val anchor = pendingAnchor ?: return@LaunchedEffect
+            // Wait for the new font/mode to measure and publish source/block positions.
+            withFrameNanos { }; withFrameNanos { }
+            val y = if (mdPreview) previewAnchors.y(anchor.offset)?.plus(previewTop)
+                else textLayout?.getCursorRect(anchor.offset.coerceIn(0, text.length))?.top?.plus(textTop)
+            if (y != null) {
+                val scroll = if (mdPreview) previewScroll else editorScroll
+                scroll.scrollTo((y - anchor.screenY).toInt().coerceIn(0, scroll.maxValue))
+            }
+            pendingAnchor = null
+        }
         var showLaunch by remember { mutableStateOf(true) }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
@@ -279,8 +321,19 @@ class MainActivity : ComponentActivity() {
                 history.reset(snapshot(editor)); historyTick++
                 finding = false; query = ""; matchIndex = 0
                 mdPreview = isMarkdownName(newTitle)
+                previewAnchors.clear()
+                pendingAnchor = DocumentAnchor(0, textTop)
+                scope.launch { editorScroll.scrollTo(0); previewScroll.scrollTo(0) }
                 dirSession++
             }
+        }
+        fun newFile(markdown: Boolean) {
+            val action: () -> Unit = {
+                documentUri = null
+                update("", if (markdown) "untitled.md" else "untitled.txt", true)
+                mdPreview = false
+            }
+            if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else action()
         }
         fun setLang(code: String) {
             if (code == lang) return
@@ -326,35 +379,21 @@ class MainActivity : ComponentActivity() {
                         onDiscardRequest = { showDiscardConfirm = true },
                         isMarkdown = isMarkdownName(title),
                         previewing = mdPreview,
-                        onTogglePreview = { mdPreview = !mdPreview },
+                        onTogglePreview = { switchMode() },
                         onDirRequest = { showDirMenu = true },
                         onHelpRequest = { showHelp = true },
-                        onFind = { finding = true; mdPreview = false }
-                    )
-                    if (finding) FindBar(
-                        query = query,
-                        onQueryChange = { query = it; matchIndex = 0 },
-                        count = matches.size,
-                        index = matchIndex.coerceIn(0, (matches.size - 1).coerceAtLeast(0)),
-                        onPrevious = { if (matches.isNotEmpty()) matchIndex = (matchIndex.coerceAtMost(matches.lastIndex) - 1 + matches.size) % matches.size },
-                        onNext = { if (matches.isNotEmpty()) matchIndex = (matchIndex + 1) % matches.size },
-                        onClose = { finding = false; query = ""; matchIndex = 0; focusManager.clearFocus() }
+                        onFind = { if (mdPreview) switchMode(); finding = true }
                     )
                     }
                 },
                 bottomBar = {
                     Column(Modifier.navigationBarsPadding().imePadding()) {
-                    if (!mdPreview) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                        TextButton(onClick = { restore(history.undo(snapshot(editor))) }, enabled = historyTick >= 0 && history.canUndo) { Text(stringResource(R.string.undo)) }
-                        TextButton(onClick = { restore(history.redo(snapshot(editor))) }, enabled = historyTick >= 0 && history.canRedo) { Text(stringResource(R.string.redo)) }
-                    }
                     ActionBar(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .imePadding()
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                        onNew = { val action = { documentUri = null; update("", "untitled.txt", true) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
+                        onNew = { newFile(false) },
+                        onNewMarkdown = { newFile(true) },
                         onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
                         onQuickSave = { documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
                         onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
@@ -364,6 +403,27 @@ class MainActivity : ComponentActivity() {
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
+                Box(Modifier.fillMaxSize().padding(innerPadding).onSizeChanged { size ->
+                    val oldHeight = viewportHeight
+                    val oldScroll = editorScroll.value
+                    viewportHeight = size.height
+                    if (oldHeight > 0 && size.height != oldHeight && !mdPreview && pendingAnchor == null) {
+                        // Retain viewport first; only move enough to reveal the focused cursor.
+                        scope.launch {
+                            withFrameNanos { }
+                            var target = oldScroll
+                            if (editorFocused && size.height < oldHeight) {
+                                textLayout?.getCursorRect(editor.selection.end.coerceIn(0, text.length))?.let { rect ->
+                                    val top = rect.top + textTop
+                                    val bottom = rect.bottom + textTop
+                                    if (bottom - target > size.height - previewTop) target = (bottom - size.height + previewTop).toInt()
+                                    if (top - target < textTop) target = (top - textTop).toInt()
+                                }
+                            }
+                            editorScroll.scrollTo(target.coerceIn(0, editorScroll.maxValue))
+                        }
+                    }
+                }) {
                 val docDirection = if (docRtl) TextDirection.Rtl else TextDirection.Ltr
                 val docAlign = if (docRtl) TextAlign.Right else TextAlign.Left
                 if (isMarkdownName(title) && mdPreview) {
@@ -372,7 +432,8 @@ class MainActivity : ComponentActivity() {
                             markdown = text,
                             onLinkClick = ::openLink,
                             fontSize = fontSize,
-                            modifier = Modifier.fillMaxSize().padding(innerPadding).documentPinchZoom(zoomDocument)
+                            scrollState = previewScroll, anchors = previewAnchors,
+                            modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument)
                         )
                     }
                 } else {
@@ -396,7 +457,9 @@ class MainActivity : ComponentActivity() {
                             activeMatch = activeMatch
                         ),
                         onTextLayout = { textLayout = it },
-                        modifier = Modifier.fillMaxSize().padding(innerPadding).documentPinchZoom(zoomDocument).padding(horizontal = 20.dp, vertical = 16.dp).verticalScroll(editorScroll),
+                        modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument)
+                            .onFocusChanged { editorFocused = it.isFocused }
+                            .verticalScroll(editorScroll).padding(horizontal = 20.dp).padding(top = 72.dp, bottom = 16.dp),
                         decorationBox = { innerTextField ->
                             if (text.isEmpty()) {
                                 Text(
@@ -410,6 +473,16 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                     }
+                }
+                Box(Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    if (finding) FloatingFind(query, { query = it; matchIndex = 0 }, matches.size,
+                        matchIndex.coerceIn(0, (matches.size - 1).coerceAtLeast(0)),
+                        { if (matches.isNotEmpty()) matchIndex = (matchIndex.coerceAtMost(matches.lastIndex) - 1 + matches.size) % matches.size },
+                        { if (matches.isNotEmpty()) matchIndex = (matchIndex + 1) % matches.size },
+                        { finding = false; query = ""; matchIndex = 0; focusManager.clearFocus() })
+                    else if (!mdPreview) FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
+                        { restore(history.undo(snapshot(editor))) }, { restore(history.redo(snapshot(editor))) })
+                }
                 }
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
@@ -448,35 +521,7 @@ class MainActivity : ComponentActivity() {
                 confirmButton = { },
                 dismissButton = { TextButton(onClick = { showFormatChoice = false }) { Text(stringResource(R.string.cancel)) } }
             )
-            if (showHelp) HelpDialog { showHelp = false }
-        }
-    }
-
-    @Composable
-    private fun FindBar(query: String, onQueryChange: (String) -> Unit, count: Int, index: Int,
-                        onPrevious: () -> Unit, onNext: () -> Unit, onClose: () -> Unit) {
-        val focus = remember { FocusRequester() }
-        LaunchedEffect(Unit) { focus.requestFocus() }
-        Surface(color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = query, onValueChange = onQueryChange, singleLine = true,
-                        label = { Text(stringResource(R.string.find_query)) },
-                        textStyle = TextStyle(textDirection = TextDirection.Content),
-                        modifier = Modifier.weight(1f).focusRequester(focus)
-                    )
-                    IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = getString(R.string.close) }) { Text("×", fontSize = 24.sp) }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (count == 0) stringResource(R.string.no_matches) else stringResource(R.string.match_count, index + 1, count),
-                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall
-                    )
-                    IconButton(onClick = onPrevious, enabled = count > 0, modifier = Modifier.semantics { contentDescription = getString(R.string.previous_match) }) { Text("↑", fontSize = 22.sp) }
-                    IconButton(onClick = onNext, enabled = count > 0, modifier = Modifier.semantics { contentDescription = getString(R.string.next_match) }) { Text("↓", fontSize = 22.sp) }
-                }
-            }
+            if (showHelp) HelpPage { showHelp = false }
         }
     }
 
@@ -541,31 +586,56 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun HelpDialog(onClose: () -> Unit) {
+    @Composable private fun HelpPage(onClose: () -> Unit) {
         val titles = stringArrayResource(R.array.help_titles)
         val bodies = stringArrayResource(R.array.help_bodies)
-        AlertDialog(
-            onDismissRequest = onClose,
-            title = { Text(stringResource(R.string.help)) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    titles.forEachIndexed { i, t ->
-                        Text(t, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text(bodies.getOrElse(i) { "" }, fontSize = 14.sp, lineHeight = 20.sp)
-                        Spacer(Modifier.height(12.dp))
+        // Keep the editor composed underneath so its selection and scroll survive.
+        androidx.compose.ui.window.Dialog(onDismissRequest = onClose,
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            CompositionLocalProvider(LocalLayoutDirection provides if (prefs.getString("lang", "en") == "fa") LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ControlButton(ControlIcon.Back, stringResource(R.string.back), onClick = onClose)
+                            Spacer(Modifier.width(12.dp))
+                            Text(stringResource(R.string.help), style = MaterialTheme.typography.titleLarge)
+                        }
+                        HorizontalDivider()
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp)) {
+                            titles.forEachIndexed { i, title ->
+                                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(8.dp))
+                                Text(bodies.getOrElse(i) { "" }, fontSize = 16.sp, lineHeight = 25.sp)
+                                Spacer(Modifier.height(24.dp))
+                            }
+                        }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = onClose) { Text(stringResource(R.string.close)) } }
-        )
+            }
+        }
     }
 
-    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onOpen: () -> Unit, onQuickSave: () -> Unit, onSaveAs: () -> Unit, onExport: () -> Unit) {
+    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onNewMarkdown: () -> Unit, onOpen: () -> Unit, onQuickSave: () -> Unit, onSaveAs: () -> Unit, onExport: () -> Unit) {
         var showSaveMenu by remember { mutableStateOf(false) }
+        var showNewMenu by remember { mutableStateOf(false) }
         Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
             Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onNew, modifier = Modifier.weight(1f).height(52.dp)) { Text(stringResource(R.string.ui_new)) }
+                Box(Modifier.weight(1f).height(52.dp)) {
+                    Surface(shape = ButtonDefaults.shape, color = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClick = onNew, onLongClick = { showNewMenu = true })) {
+                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.ui_new))
+                            Spacer(Modifier.width(4.dp))
+                            Text("▲", fontSize = 11.sp, modifier = Modifier.offset(y = (-1).dp))
+                        }
+                    }
+                    DropdownMenu(expanded = showNewMenu, onDismissRequest = { showNewMenu = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.new_txt)) }, onClick = { showNewMenu = false; onNew() })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.new_md)) }, onClick = { showNewMenu = false; onNewMarkdown() })
+                    }
+                }
                 Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text(stringResource(R.string.ui_open)) }
                 Box(Modifier.weight(1f).height(52.dp)) {
                     val btnColors = ButtonDefaults.buttonColors()
@@ -577,8 +647,8 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.ui_save))
-                            Spacer(Modifier.width(6.dp))
-                            Text("▲", fontSize = 14.sp)
+                            Spacer(Modifier.width(4.dp))
+                            Text("▲", fontSize = 11.sp, modifier = Modifier.offset(y = (-1).dp))
                         }
                     }
                     DropdownMenu(expanded = showSaveMenu, onDismissRequest = { showSaveMenu = false }) {

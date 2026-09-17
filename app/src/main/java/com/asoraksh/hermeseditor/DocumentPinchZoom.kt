@@ -3,6 +3,8 @@ package com.asoraksh.hermeseditor
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -17,7 +19,7 @@ import androidx.compose.ui.input.pointer.pointerInput
  * cursor or activate a preview link after a pinch.
  */
 @Composable
-fun Modifier.documentPinchZoom(onZoom: (Float) -> Unit): Modifier {
+fun Modifier.documentPinchZoom(onZoom: (Float, Offset) -> Unit): Modifier {
     val currentOnZoom = rememberUpdatedState(onZoom)
     return pointerInput(Unit) {
         awaitEachGesture {
@@ -33,7 +35,7 @@ fun Modifier.documentPinchZoom(onZoom: (Float) -> Unit): Modifier {
                     if (event.changes.all { it.pressed && it.previousPressed }) {
                         val zoom = event.calculateZoom()
                         if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
-                            currentOnZoom.value(zoom)
+                            currentOnZoom.value(zoom, event.calculateCentroid(useCurrent = false))
                         }
                     }
                 }

@@ -40,32 +40,44 @@
     <string name="about_body">Version %1$s\n\nCreated by Hermes Agent and Notion AI\nwith help, direction, and oversight by\nSina Chaghamirza · AsoraKSH</string>
 
     <string-array name="help_titles">
-        <item>Hermes Text Editor</item>
-        <item>Create a new file</item>
+        <item>Create a text file</item>
+        <item>Create a Markdown file</item>
         <item>Open a file</item>
-        <item>Edit text</item>
-        <item>Markdown files</item>
-        <item>Save</item>
-        <item>Save as</item>
-        <item>Export Markdown as plain text</item>
+        <item>Open from your file manager</item>
+        <item>Editing</item>
+        <item>Live Markdown styling</item>
+        <item>Preview and Edit Markdown</item>
+        <item>Normal Save</item>
+        <item>Save menu</item>
+        <item>Save a copy</item>
+        <item>Export plain text</item>
+        <item>Undo and Redo</item>
+        <item>Find</item>
+        <item>Zoom document text</item>
+        <item>Light and Dark themes</item>
+        <item>Interface language</item>
         <item>Text direction</item>
-        <item>Themes and language</item>
-        <item>Links</item>
-        <item>Privacy</item>
+        <item>Privacy and drafts</item>
     </string-array>
     <string-array name="help_bodies">
-        <item>Hermes Text Editor is a simple, offline-focused editor for text and Markdown files.</item>
-        <item>Tap New to start a blank document. When you are ready, tap Save and choose a name and folder.</item>
-        <item>Tap Open to choose a .txt or .md file from Android\'s file picker. You can also open a supported file from your Android file manager and choose Hermes Text Editor.</item>
-        <item>Write and edit normally. The file name appears below the app title. If a file name is long, swipe it sideways to see the complete name.</item>
-        <item>Markdown files open in Preview mode. Use the three-dot menu to choose Edit Markdown and change the original Markdown text. Choose Preview Markdown to read the formatted result. Saving keeps the original Markdown source.</item>
-        <item>Tap Save to update the currently open file. For a new document, Save opens the save screen so you can choose a name and folder.</item>
-        <item>Press and hold Save ▲, then choose Save as…. Create another copy with a different name, folder, or .txt / .md extension. Save as keeps your text exactly as written.</item>
-        <item>Press and hold Save ▲, then choose Export as plain text…. This creates a separate .txt copy without Markdown formatting symbols. Your original Markdown file is not changed.</item>
-        <item>Hermes may suggest Right-to-Left for a Persian document or Left-to-Right for an English document when the current writing direction does not match. You can always change this manually in the three-dot menu under Text direction.</item>
-        <item>Use the three-dot menu to switch between Light and Dark themes, or between English and فارسی. These choices are saved on your device.</item>
-        <item>In Markdown Preview, tap a web link to open it in your browser. Only normal http and https links should be opened.</item>
-        <item>Hermes Text Editor is designed to work offline. It does not include ads, analytics, tracking, or a WebView. Your files stay on your device except when you choose to open or save them through Android\'s file picker.</item>
+        <item>Tap New ▲ to start untitled.txt. If text exists, confirm before replacing it. Your saved file is not deleted.</item>
+        <item>Hold New ▲ and choose New Markdown file (.md). A blank untitled.md opens in source editing mode, ready to write.</item>
+        <item>Tap Open and choose a .txt, .md, or .markdown file through Android’s file picker.</item>
+        <item>Choose a supported text file in your Android file manager and open it with Hermes Text Editor.</item>
+        <item>Tap to place the cursor, type, select, copy and paste. Long filenames stay on one line; swipe the name sideways to read it.</item>
+        <item>In Edit Markdown, headings, emphasis, links, lists, quotes and code are styled as you type. All Markdown symbols remain visible and editable; source text is preserved.</item>
+        <item>Use the three-dot menu to switch modes. Preview is formatted for reading; Edit Markdown shows the original source. Switching keeps approximately the same document section. Tap a web link in Preview to open your browser.</item>
+        <item>Tap Save ▲ to write the current file. A short message confirms success. If saving fails, your draft remains intact; use Save as… to make a copy.</item>
+        <item>Hold anywhere on Save ▲ to open Save as… and Export as plain text… above the controls.</item>
+        <item>Choose Save as… and select .txt or .md, then a filename and folder. The copy keeps the exact source content, including Markdown symbols.</item>
+        <item>Hold Save ▲ and choose Export as plain text… for a readable .txt copy without Markdown formatting. The original Markdown file is unchanged.</item>
+        <item>Use the curved icons near the top of the editor. Rapid typing is grouped; unavailable actions are disabled. History is bounded and local. Undo and Redo do not change the saved file until Save.</item>
+        <item>Choose Find in the three-dot menu. Type a word or phrase and use the previous/next icons. The counter shows current / total matches. Find does not edit text. In Markdown Preview it switches to source mode. Close Find to restore the Undo/Redo control.</item>
+        <item>Pinch with two fingers to enlarge or reduce text. Zoom applies to editing and Preview, stays between comfortable limits and is saved locally. One finger still scrolls and selects normally.</item>
+        <item>Use the sun/moon item in the three-dot menu to switch themes. Document styling updates with the theme.</item>
+        <item>Choose English or فارسی in the three-dot menu. The interface language is saved locally; your document text is not translated.</item>
+        <item>Choose Left-to-right or Right-to-left in the three-dot menu. Clearly Persian or English files may receive a suggestion when their direction differs from the current setting. Manual direction remains your choice.</item>
+        <item>Hermes Text Editor works offline: no ads, analytics, tracking, WebView or Internet permission. Your draft is recovered locally. Files are accessed through Android’s picker or file-manager opening. Links open externally only when tapped.</item>
     </string-array>
     <string name="saved">Saved: %1$s</string>
     <string name="saved_copy">Saved copy: %1$s</string>
@@ -75,10 +87,13 @@
     <string name="redo">Redo</string>
     <string name="find">Find</string>
     <string name="find_query">Word or phrase</string>
-    <string name="match_count">%1$d of %2$d</string>
+    <string name="match_count">%1$d / %2$d</string>
     <string name="no_matches">No matches</string>
     <string name="previous_match">Previous match</string>
     <string name="next_match">Next match</string>
     <string name="zoom_hint">Use two fingers to zoom text in or out.</string>
     <string name="save_hint">Hold Save ▲ for Save as and Export.</string>
+    <string name="back">Back</string>
+    <string name="new_txt">New text file (.txt)</string>
+    <string name="new_md">New Markdown file (.md)</string>
 </resources>
