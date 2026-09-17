@@ -56,6 +56,46 @@ private val mdParser: Parser = Parser.builder()
     .extensions(listOf(StrikethroughExtension.create(), TaskListItemsExtension.create()))
     .build()
 
+// Local Markdown-to-plain-text export. Drops formatting syntax, keeps readable
+// text, paragraph breaks, list text, link labels and code content. Source untouched.
+fun markdownToPlainText(src: String): String {
+    if (src.isBlank()) return ""
+    val sb = StringBuilder()
+    fun inline(n: Node) {
+        var c: Node? = n.firstChild
+        while (c != null) {
+            val cur = c
+            when (cur) {
+                is Text -> sb.append(cur.literal)
+                is Code -> sb.append(cur.literal)
+                is Emphasis, is StrongEmphasis, is Strikethrough, is Link -> inline(cur)
+                is Image -> inline(cur)
+                is SoftLineBreak -> sb.append(' ')
+                is HardLineBreak -> sb.append('\n')
+                else -> inline(cur)
+            }
+            c = cur.next
+        }
+    }
+    fun blocks(n: Node) {
+        var c: Node? = n.firstChild
+        while (c != null) {
+            val cur = c
+            when (cur) {
+                is Paragraph, is Heading -> { inline(cur); sb.append("\n\n") }
+                is ListItem -> { inline(cur); sb.append('\n') }
+                is FencedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
+                is IndentedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
+                is TaskListItemMarker -> { }
+                else -> blocks(cur)
+            }
+            c = cur.next
+        }
+    }
+    blocks(mdParser.parse(src))
+    return sb.toString().trim()
+}
+
 @Composable
 fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier) {
     if (markdown.isBlank()) {
@@ -231,7 +271,7 @@ private fun CodeBlock(code: String) {
 private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Unit) {
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
-    val annotated = remember(node) { inlineAnnotated(node, linkColor, codeBg) }
+    val annotated = remember(node, linkColor, codeBg) { inlineAnnotated(node, linkColor, codeBg) }
     ClickableText(
         text = annotated,
         style = style,
