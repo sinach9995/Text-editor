@@ -1,0 +1,41 @@
+"""Source regression guards; not Android gesture or keyboard tests."""
+from pathlib import Path
+import unittest
+ROOT = Path(__file__).resolve().parents[1] / 'app/src/main/java/com/asoraksh/hermeseditor'
+class ViewportFollowup(unittest.TestCase):
+    def test_no_resize_scroll_race(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        self.assertNotIn('val oldScroll = editorScroll.value', text)
+        self.assertIn('.bringIntoViewRequester(cursorRequester)', text)
+        self.assertNotIn('padding(top = 72.dp', text)
+    def test_pinch_lifecycle_and_both_modes(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        self.assertEqual(text.count('.documentPinchZoom(zoomDocument, startPinch, endPinch)'), 2)
+        self.assertIn('textAnchors = previewTextAnchors', text)
+        gesture = (ROOT / 'DocumentPinchZoom.kt').read_text()
+        self.assertIn('if (!multiTouch)', gesture)
+        self.assertIn('finally', gesture)
+    def test_preview_anchors_use_rendered_text(self):
+        text = (ROOT / 'MarkdownPreview.kt').read_text()
+        self.assertIn('LocalPreviewTextAnchors', text)
+        self.assertIn('onTextLayout =', text)
+        main = (ROOT / 'MainActivity.kt').read_text()
+        self.assertIn('previewTextAnchors.capture(centroid)', main)
+    def test_history_is_overlay_not_bottom_bar_child(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        bar = text.split('bottomBar = {', 1)[1].split('contentWindowInsets', 1)[0]
+        self.assertNotIn('FloatingHistory(', bar)
+        self.assertIn('Modifier.align(Alignment.BottomEnd)', text)
+    def test_pinch_has_exclusive_scroll_ownership(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        self.assertIn('MutatePriority.PreventUserInput', text)
+        self.assertIn('lastPinchLayout !== layout', text)
+        self.assertIn('cursorVisibilityRequest', text)
+        preview = (ROOT / 'PreviewTextAnchors.kt').read_text()
+        self.assertIn('correctedLayout === layout', preview)
+    def test_action_label_and_arrow_are_centered_as_one_group(self):
+        text = (ROOT / 'MainActivity.kt').read_text()
+        self.assertEqual(text.count('CombinedActionLabel(stringResource('), 2)
+        self.assertIn('Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center)', text)
+        self.assertIn('Spacer(Modifier.width(3.dp))', text)
+if __name__ == '__main__': unittest.main()
