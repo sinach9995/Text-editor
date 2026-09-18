@@ -34,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.geometry.Offset
@@ -68,6 +69,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 
@@ -250,6 +253,13 @@ class MainActivity : ComponentActivity() {
         var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinching by remember { mutableStateOf(false) }
+        // Keep typography stable while fingers are down.  Reflowing a long
+        // BasicTextField for every pointer event causes the visible jumping
+        // reported on-device.  The gesture is drawn as a GPU scale first and
+        // committed to the real font size only when the pinch ends.
+        var pinchVisualScale by remember { mutableStateOf(1f) }
+        var pinchCentroid by remember { mutableStateOf(Offset.Zero) }
+        var sourceContentSize by remember { mutableStateOf(IntSize.Zero) }
         var pinchLineFraction by remember { mutableStateOf(0f) }
         var pinchScrollOwner by remember { mutableStateOf<Job?>(null) }
         var lastPinchLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -311,6 +321,8 @@ class MainActivity : ComponentActivity() {
             pendingAnchor = null
             pinchScrollOwner?.cancel()
             cursorVisibilityRequest = false
+            pinchVisualScale = 1f
+            pinchCentroid = centroid
             // Cancel an existing fling/Find/BIV animation before capturing geometry.
             val scroll = if (mdPreview) previewScroll else editorScroll
             pinchScrollOwner = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -330,11 +342,27 @@ class MainActivity : ComponentActivity() {
             }
             pinching = true
         }
-        val zoomDocument: (Float) -> Unit = { factor ->
-            val next = (fontSize * factor).coerceIn(13f, 30f)
-            if (next.isFinite()) fontSize = next
+        val zoomDocument: (Float, Offset) -> Unit = { factor, centroid ->
+            // Visual-only scaling during the gesture keeps the character below
+            // the fingers fixed.  Do not change fontSize here: changing it
+            // reflows wrapped lines asynchronously and makes the page jump.
+            pinchCentroid = centroid
+            val minRelativeScale = 13f / fontSize
+            val maxRelativeScale = 30f / fontSize
+            val next = (pinchVisualScale * factor).coerceIn(minRelativeScale, maxRelativeScale)
+            if (next.isFinite()) pinchVisualScale = next
         }
         val endPinch: () -> Unit = {
+            // Make one real typography change after the fingers lift.  The
+            // existing gesture-start anchor corrects the one resulting reflow.
+            val nextFontSize = (fontSize * pinchVisualScale).coerceIn(13f, 30f)
+            val changed = nextFontSize != fontSize
+            pinchVisualScale = 1f
+            if (changed) {
+                fontSize = nextFontSize
+                // Force exactly one correction when the final layout arrives.
+                lastPinchLayout = null
+            }
             pinching = false
             prefs.edit().putFloat("document_font_size", fontSize).apply()
         }
@@ -488,6 +516,8 @@ class MainActivity : ComponentActivity() {
                             fontSize = fontSize,
                             scrollState = previewScroll, anchors = previewAnchors,
                             textAnchors = previewTextAnchors,
+                            pinchScale = pinchVisualScale,
+                            pinchCentroid = pinchCentroid,
                             modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
                         )
                     }
@@ -536,6 +566,22 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth()
                             .onFocusChanged { editorFocused = it.isFocused }
                             .bringIntoViewRequester(cursorRequester)
+                            .onSizeChanged { sourceContentSize = it }
+                            .graphicsLayer {
+                                // BasicTextField is a very tall child inside a
+                                // vertical scroll container.  Its local pivot
+                                // must therefore include the current scroll
+                                // amount, otherwise scaling appears to jump.
+                                val width = sourceContentSize.width.toFloat().coerceAtLeast(1f)
+                                val height = sourceContentSize.height.toFloat().coerceAtLeast(1f)
+                                val pivotX = ((pinchCentroid.x - with(density) { 20.dp.toPx() }) / width)
+                                    .coerceIn(0f, 1f)
+                                val pivotY = ((editorScroll.value + pinchCentroid.y - textTop) / height)
+                                    .coerceIn(0f, 1f)
+                                scaleX = pinchVisualScale
+                                scaleY = pinchVisualScale
+                                transformOrigin = TransformOrigin(pivotX, pivotY)
+                            }
                             .onGloballyPositioned {
                                 val anchor = pinchAnchor
                                 val layout = textLayout
@@ -706,23 +752,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun CenteredActionLabel(word: String) {
-        androidx.compose.ui.layout.Layout(
-            modifier = Modifier.fillMaxSize(),
-            content = {
+    @Composable private fun CombinedActionLabel(word: String) {
+        // Center the label and arrow as a single compact group.  Keeping only
+        // the word centered made the arrows look detached on a narrow phone.
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(word, maxLines = 1)
-                Text("▲", fontSize = 11.sp)
-            }
-        ) { measurables, constraints ->
-            val width = constraints.maxWidth
-            val height = constraints.maxHeight
-            val loose = constraints.copy(minWidth = 0, minHeight = 0)
-            val arrow = measurables[1].measure(loose)
-            val gap = 3.dp.roundToPx()
-            val label = measurables[0].measure(loose.copy(maxWidth = (width - 2 * (arrow.width + gap)).coerceAtLeast(0)))
-            layout(width, height) {
-                label.placeRelative((width - label.width) / 2, (height - label.height) / 2)
-                arrow.placeRelative((width + label.width) / 2 + gap, (height - arrow.height) / 2 - 2.dp.roundToPx())
+                Spacer(Modifier.width(3.dp))
+                Text("▲", fontSize = 11.sp, modifier = Modifier.offset(y = (-1).dp))
             }
         }
     }
@@ -737,7 +774,7 @@ class MainActivity : ComponentActivity() {
                         contentColor = MaterialTheme.colorScheme.primary,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClick = onNew, onLongClick = { showNewMenu = true })) {
-                        CenteredActionLabel(stringResource(R.string.ui_new))
+                        CombinedActionLabel(stringResource(R.string.ui_new))
                     }
                     DropdownMenu(expanded = showNewMenu, onDismissRequest = { showNewMenu = false }) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.new_txt)) }, onClick = { showNewMenu = false; onNew() })
@@ -753,7 +790,7 @@ class MainActivity : ComponentActivity() {
                         contentColor = btnColors.contentColor,
                         modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_save), onClick = onQuickSave, onLongClick = { showSaveMenu = true })
                     ) {
-                        CenteredActionLabel(stringResource(R.string.ui_save))
+                        CombinedActionLabel(stringResource(R.string.ui_save))
                     }
                     DropdownMenu(expanded = showSaveMenu, onDismissRequest = { showSaveMenu = false }) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.ui_save_as)) }, onClick = { showSaveMenu = false; onSaveAs() })
