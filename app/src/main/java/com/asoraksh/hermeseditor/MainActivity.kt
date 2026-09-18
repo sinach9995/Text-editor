@@ -292,7 +292,10 @@ class MainActivity : ComponentActivity() {
         }
         var title by rememberSaveable { mutableStateOf("untitled.txt") }
         var selectedTheme by rememberSaveable { mutableStateOf(if (prefs.getString("theme", "dark") == "light") AppTheme.LIGHT else AppTheme.DARK) }
-        var lang by rememberSaveable { mutableStateOf(prefs.getString("lang", "en") ?: "en") }
+        // Read the saved language again after recreate(). rememberSaveable
+        // restored English after the first Persian choice and mixed Farsi
+        // resources with an LTR onboarding state.
+        var lang by remember { mutableStateOf(prefs.getString("lang", "en") ?: "en") }
         var showDiscardDialog by remember { mutableStateOf(false) }
         var showDiscardConfirm by remember { mutableStateOf(false) }
         var showFormatChoice by remember { mutableStateOf(false) }
@@ -300,10 +303,10 @@ class MainActivity : ComponentActivity() {
         // One guided tour replaces the old auto-dismissed Snackbar hints.
         // Language is chosen explicitly once so a Persian reader never has to
         // understand an English-only first-launch instruction.
-        var showOnboardingLanguage by rememberSaveable {
+        var showOnboardingLanguage by remember {
             mutableStateOf(!prefs.getBoolean("onboarding_language_chosen", false))
         }
-        var showOnboarding by rememberSaveable {
+        var showOnboarding by remember {
             mutableStateOf(
                 prefs.getBoolean("onboarding_language_chosen", false) &&
                     !prefs.getBoolean("onboarding_complete", false)
@@ -450,17 +453,20 @@ class MainActivity : ComponentActivity() {
             recreate()
         }
         fun chooseOnboardingLanguage(code: String) {
+            val languageChanged = code != lang
             prefs.edit()
                 .putString("lang", code)
                 .putBoolean("onboarding_language_chosen", true)
                 .apply()
-            if (code != lang) {
+            // Update these before a Persian resource recreation. The next
+            // activity reads the language freshly from preferences.
+            lang = code
+            showOnboardingLanguage = false
+            onboardingStep = 0
+            showOnboarding = true
+            if (languageChanged) {
                 // attachBaseContext reloads the localized resources after this.
                 recreate()
-            } else {
-                showOnboardingLanguage = false
-                onboardingStep = 0
-                showOnboarding = true
             }
         }
         fun finishOnboarding() {
@@ -874,8 +880,10 @@ class MainActivity : ComponentActivity() {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .padding(start = 24.dp, top = 150.dp, end = 24.dp, bottom = 220.dp),
-                    contentAlignment = Alignment.TopCenter
+                        .padding(start = 24.dp, top = 120.dp, end = 24.dp, bottom = 270.dp),
+                    // Lower placement: directly above Undo/Redo without
+                    // covering it or the bottom New/Open/Save controls.
+                    contentAlignment = Alignment.BottomCenter
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),

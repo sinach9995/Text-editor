@@ -15,13 +15,16 @@ class OnboardingContract(unittest.TestCase):
         self.assertNotIn('"save_hint_seen"', code)
         self.assertIn('onboarding_language_chosen', code)
         self.assertIn('onboarding_complete', code)
+        self.assertIn('var lang by remember { mutableStateOf', code)
+        self.assertIn('showOnboarding = true', code)
         self.assertIn('OnboardingGuide(', code)
         self.assertIn('onboardingStep >= 3', code)
 
     def test_guide_is_replayable_and_kept_clear_of_bottom_controls(self):
         code = SOURCE.read_text()
         self.assertIn('onboarding_replay', code)
-        self.assertIn('top = 150.dp, bottom = 220.dp', code)
+        self.assertIn('contentAlignment = Alignment.BottomCenter', code)
+        self.assertIn('top = 120.dp, end = 24.dp, bottom = 270.dp', code)
         self.assertIn('onDismissRequest = onSkip', code)
 
     def test_both_languages_include_all_guide_strings(self):
@@ -36,6 +39,8 @@ class OnboardingContract(unittest.TestCase):
             ):
                 self.assertIn(f'name="{name}"', resources)
         self.assertIn('>راهنمای شروع<', FA.read_text())
+        self.assertIn('>بازگرداندن<', FA.read_text())
+        self.assertIn('>تکرار تغییر<', FA.read_text())
 
 
 if __name__ == "__main__":
