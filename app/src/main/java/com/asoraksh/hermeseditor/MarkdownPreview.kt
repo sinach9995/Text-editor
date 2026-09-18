@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -130,7 +131,7 @@ fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: M
         val document = remember(markdown) { mdParser.parse(markdown) }
         CompositionLocalProvider(LocalPreviewTextAnchors provides textAnchors) {
         var contentHeight by remember { mutableStateOf(1) }
-        Column(modifier.onGloballyPositioned { textAnchors.viewport = it }
+        Column(modifier.clipToBounds().onGloballyPositioned { textAnchors.viewport = it }
             .verticalScroll(scrollState)) {
             Column(
                 Modifier
