@@ -874,7 +874,7 @@ class MainActivity : ComponentActivity() {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, top = 150.dp, bottom = 220.dp),
+                        .padding(start = 24.dp, top = 150.dp, end = 24.dp, bottom = 220.dp),
                     contentAlignment = Alignment.TopCenter
                 ) {
                     Surface(
