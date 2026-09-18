@@ -22,6 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -112,7 +116,7 @@ private val LocalPreviewTextAnchors = staticCompositionLocalOf<PreviewTextAnchor
 private class MeasuredPreviewText { var layout: TextLayoutResult? = null }
 
 @Composable
-fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f, scrollState: ScrollState = rememberScrollState(), anchors: PreviewAnchors = remember { PreviewAnchors() }, textAnchors: PreviewTextAnchors = remember { PreviewTextAnchors() }) {
+fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: Modifier = Modifier, fontSize: Float = 17f, scrollState: ScrollState = rememberScrollState(), anchors: PreviewAnchors = remember { PreviewAnchors() }, textAnchors: PreviewTextAnchors = remember { PreviewTextAnchors() }, pinchScale: Float = 1f, pinchCentroid: Offset = Offset.Zero) {
     // Scale document typography only, not padding, controls or application chrome.
     val scale = if (fontSize.isFinite() && fontSize > 0f) fontSize / 17f else 1f
     if (markdown.isBlank()) {
@@ -122,8 +126,27 @@ fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: M
     } else {
         val document = remember(markdown) { mdParser.parse(markdown) }
         CompositionLocalProvider(LocalPreviewTextAnchors provides textAnchors) {
+        var contentHeight by remember { mutableStateOf(1) }
         Column(modifier.onGloballyPositioned { textAnchors.viewport = it }
-            .verticalScroll(scrollState).padding(horizontal = 20.dp, vertical = 16.dp)) {
+            .verticalScroll(scrollState)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .onSizeChanged { contentHeight = it.height.coerceAtLeast(1) }
+                    .graphicsLayer {
+                        // Like source editing, draw a smooth temporary scale
+                        // around the gesture point and defer text reflow until
+                        // gesture end.
+                        val pivotX = ((pinchCentroid.x - 20.dp.toPx()) / size.width.coerceAtLeast(1f))
+                            .coerceIn(0f, 1f)
+                        val pivotY = ((scrollState.value + pinchCentroid.y - 16.dp.toPx()) / contentHeight)
+                            .coerceIn(0f, 1f)
+                        scaleX = pinchScale
+                        scaleY = pinchScale
+                        transformOrigin = TransformOrigin(pivotX, pivotY)
+                    }
+            ) {
             var child = document.firstChild
             while (child != null) {
                 val block = child
@@ -134,6 +157,7 @@ fun MarkdownPreview(markdown: String, onLinkClick: (String) -> Unit, modifier: M
                 }) { RenderBlock(block, 0, onLinkClick, scale) }
                 child = block.next
             }
+        }
         }
         }
     }
