@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.geometry.Offset
@@ -69,6 +70,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 
@@ -251,11 +254,13 @@ class MainActivity : ComponentActivity() {
         var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinching by remember { mutableStateOf(false) }
-        // A document must reflow to its actual width while zooming.  Applying
-        // graphicsLayer scaling made text escape the content column.  Coalesce
-        // many pointer samples into at most one real typography update/frame.
-        var pinchTargetFontSize by remember { mutableStateOf(fontSize) }
-        var pinchFrameJob by remember { mutableStateOf<Job?>(null) }
+        // Keep typography stable while fingers are down.  Reflowing a long
+        // BasicTextField for every pointer event causes the visible jumping
+        // reported on-device.  The gesture is drawn as a GPU scale first and
+        // committed to the real font size only when the pinch ends.
+        var pinchVisualScale by remember { mutableStateOf(1f) }
+        var pinchCentroid by remember { mutableStateOf(Offset.Zero) }
+        var sourceContentSize by remember { mutableStateOf(IntSize.Zero) }
         var pinchLineFraction by remember { mutableStateOf(0f) }
         var pinchScrollOwner by remember { mutableStateOf<Job?>(null) }
         var lastPinchLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -276,14 +281,6 @@ class MainActivity : ComponentActivity() {
             if (value != null) { editor = TextFieldValue(value.text, TextRange(value.start, value.end)); cacheDraft(value.text); historyTick++ }
         }
         LaunchedEffect(Unit) { for (message in messages) { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(message, duration = SnackbarDuration.Short) } }
-        LaunchedEffect(Unit) {
-            for ((key, resource) in listOf("zoom_hint_seen" to R.string.zoom_hint, "save_hint_seen" to R.string.save_hint)) {
-                if (!prefs.getBoolean(key, false)) {
-                    prefs.edit().putBoolean(key, true).apply()
-                    snackbar.showSnackbar(getString(resource), duration = SnackbarDuration.Short)
-                }
-            }
-        }
         LaunchedEffect(activeMatch) {
             withFrameNanos { }
             val match = activeMatch
@@ -300,6 +297,19 @@ class MainActivity : ComponentActivity() {
         var showDiscardConfirm by remember { mutableStateOf(false) }
         var showFormatChoice by remember { mutableStateOf(false) }
         var showHelp by remember { mutableStateOf(false) }
+        // One guided tour replaces the old auto-dismissed Snackbar hints.
+        // Language is chosen explicitly once so a Persian reader never has to
+        // understand an English-only first-launch instruction.
+        var showOnboardingLanguage by rememberSaveable {
+            mutableStateOf(!prefs.getBoolean("onboarding_language_chosen", false))
+        }
+        var showOnboarding by rememberSaveable {
+            mutableStateOf(
+                prefs.getBoolean("onboarding_language_chosen", false) &&
+                    !prefs.getBoolean("onboarding_complete", false)
+            )
+        }
+        var onboardingStep by rememberSaveable { mutableStateOf(0) }
         var showDirMenu by remember { mutableStateOf(false) }
         var dirSuggest by remember { mutableStateOf<Boolean?>(null) }
         var dirSession by remember { mutableStateOf(0) }
@@ -317,9 +327,8 @@ class MainActivity : ComponentActivity() {
             pendingAnchor = null
             pinchScrollOwner?.cancel()
             cursorVisibilityRequest = false
-            pinchFrameJob?.cancel()
-            pinchFrameJob = null
-            pinchTargetFontSize = fontSize
+            pinchVisualScale = 1f
+            pinchCentroid = centroid
             // Cancel an existing fling/Find/BIV animation before capturing geometry.
             val scroll = if (mdPreview) previewScroll else editorScroll
             pinchScrollOwner = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -339,32 +348,24 @@ class MainActivity : ComponentActivity() {
             }
             pinching = true
         }
-        val zoomDocument: (Float) -> Unit = { factor ->
-            // The actual text size is applied while pinching so words rewrap
-            // inside the editor width, like a message reader.  Updating at most
-            // once per rendered frame avoids repeated stale-layout corrections.
-            val next = (pinchTargetFontSize * factor).coerceIn(13f, 30f)
-            if (next.isFinite() && next != pinchTargetFontSize) {
-                pinchTargetFontSize = next
-                if (pinchFrameJob?.isActive != true) {
-                    pinchFrameJob = scope.launch {
-                        withFrameNanos { }
-                        if (pinching && fontSize != pinchTargetFontSize) {
-                            fontSize = pinchTargetFontSize
-                            // The next TextLayoutResult gets exactly one
-                            // correction from the fixed gesture-start anchor.
-                            lastPinchLayout = null
-                        }
-                        pinchFrameJob = null
-                    }
-                }
-            }
+        val zoomDocument: (Float, Offset) -> Unit = { factor, centroid ->
+            // Visual-only scaling during the gesture keeps the character below
+            // the fingers fixed.  Do not change fontSize here: changing it
+            // reflows wrapped lines asynchronously and makes the page jump.
+            pinchCentroid = centroid
+            val minRelativeScale = 13f / fontSize
+            val maxRelativeScale = 30f / fontSize
+            val next = (pinchVisualScale * factor).coerceIn(minRelativeScale, maxRelativeScale)
+            if (next.isFinite()) pinchVisualScale = next
         }
         val endPinch: () -> Unit = {
-            pinchFrameJob?.cancel()
-            pinchFrameJob = null
-            if (fontSize != pinchTargetFontSize) {
-                fontSize = pinchTargetFontSize
+            // Make one real typography change after the fingers lift.  The
+            // existing gesture-start anchor corrects the one resulting reflow.
+            val nextFontSize = (fontSize * pinchVisualScale).coerceIn(13f, 30f)
+            val changed = nextFontSize != fontSize
+            pinchVisualScale = 1f
+            if (changed) {
+                fontSize = nextFontSize
                 // Force exactly one correction when the final layout arrives.
                 lastPinchLayout = null
             }
@@ -448,6 +449,29 @@ class MainActivity : ComponentActivity() {
             lang = code
             recreate()
         }
+        fun chooseOnboardingLanguage(code: String) {
+            prefs.edit()
+                .putString("lang", code)
+                .putBoolean("onboarding_language_chosen", true)
+                .apply()
+            if (code != lang) {
+                // attachBaseContext reloads the localized resources after this.
+                recreate()
+            } else {
+                showOnboardingLanguage = false
+                onboardingStep = 0
+                showOnboarding = true
+            }
+        }
+        fun finishOnboarding() {
+            prefs.edit().putBoolean("onboarding_complete", true).apply()
+            showOnboarding = false
+        }
+        fun replayOnboarding() {
+            prefs.edit().putBoolean("onboarding_complete", false).apply()
+            onboardingStep = 0
+            showOnboarding = true
+        }
         LaunchedEffect(Unit) {
             updateEditor = ::update
             pendingDocument?.let { update(it.first, it.second, true); pendingDocument = null }
@@ -521,6 +545,8 @@ class MainActivity : ComponentActivity() {
                             fontSize = fontSize,
                             scrollState = previewScroll, anchors = previewAnchors,
                             textAnchors = previewTextAnchors,
+                            pinchScale = pinchVisualScale,
+                            pinchCentroid = pinchCentroid,
                             modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
                         )
                     }
@@ -569,6 +595,22 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth()
                             .onFocusChanged { editorFocused = it.isFocused }
                             .bringIntoViewRequester(cursorRequester)
+                            .onSizeChanged { sourceContentSize = it }
+                            .graphicsLayer {
+                                // BasicTextField is a very tall child inside a
+                                // vertical scroll container.  Its local pivot
+                                // must therefore include the current scroll
+                                // amount, otherwise scaling appears to jump.
+                                val width = sourceContentSize.width.toFloat().coerceAtLeast(1f)
+                                val height = sourceContentSize.height.toFloat().coerceAtLeast(1f)
+                                val pivotX = ((pinchCentroid.x - with(density) { 20.dp.toPx() }) / width)
+                                    .coerceIn(0f, 1f)
+                                val pivotY = ((editorScroll.value + pinchCentroid.y - textTop) / height)
+                                    .coerceIn(0f, 1f)
+                                scaleX = pinchVisualScale
+                                scaleY = pinchVisualScale
+                                transformOrigin = TransformOrigin(pivotX, pivotY)
+                            }
                             .onGloballyPositioned {
                                 val anchor = pinchAnchor
                                 val layout = textLayout
@@ -645,7 +687,27 @@ class MainActivity : ComponentActivity() {
                 confirmButton = { },
                 dismissButton = { TextButton(onClick = { showFormatChoice = false }) { Text(stringResource(R.string.cancel)) } }
             )
-            if (showHelp) HelpPage { showHelp = false }
+            if (showHelp) HelpPage(
+                onClose = { showHelp = false },
+                onReplayIntro = {
+                    showHelp = false
+                    replayOnboarding()
+                }
+            )
+            if (showOnboardingLanguage) {
+                OnboardingLanguageDialog(onLanguage = ::chooseOnboardingLanguage)
+            } else if (showOnboarding) {
+                OnboardingGuide(
+                    language = lang,
+                    step = onboardingStep,
+                    onBack = { if (onboardingStep > 0) onboardingStep-- },
+                    onSkip = ::finishOnboarding,
+                    onNext = {
+                        if (onboardingStep >= 3) finishOnboarding()
+                        else onboardingStep++
+                    }
+                )
+            }
         }
     }
 
@@ -710,7 +772,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun HelpPage(onClose: () -> Unit) {
+    @Composable private fun HelpPage(onClose: () -> Unit, onReplayIntro: () -> Unit) {
         val titles = stringArrayResource(R.array.help_titles)
         val bodies = stringArrayResource(R.array.help_bodies)
         // Keep the editor composed underneath so its selection and scroll survive.
@@ -725,12 +787,142 @@ class MainActivity : ComponentActivity() {
                             Text(stringResource(R.string.help), style = MaterialTheme.typography.titleLarge)
                         }
                         HorizontalDivider()
+                        TextButton(
+                            onClick = onReplayIntro,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text(stringResource(R.string.onboarding_replay)) }
+                        HorizontalDivider()
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp)) {
                             titles.forEachIndexed { i, title ->
                                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.height(8.dp))
                                 Text(bodies.getOrElse(i) { "" }, fontSize = 16.sp, lineHeight = 25.sp)
                                 Spacer(Modifier.height(24.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun OnboardingLanguageDialog(onLanguage: (String) -> Unit) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Choose language / زبان را انتخاب کنید",
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(onClick = { onLanguage("en") }) { Text("English") }
+                        Button(onClick = { onLanguage("fa") }) { Text("فارسی") }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun OnboardingGuide(
+        language: String,
+        step: Int,
+        onBack: () -> Unit,
+        onSkip: () -> Unit,
+        onNext: () -> Unit
+    ) {
+        val safeStep = step.coerceIn(0, 3)
+        val title = when (safeStep) {
+            0 -> stringResource(R.string.onboarding_new_title)
+            1 -> stringResource(R.string.onboarding_save_title)
+            2 -> stringResource(R.string.onboarding_history_title)
+            else -> stringResource(R.string.onboarding_zoom_title)
+        }
+        val body = when (safeStep) {
+            0 -> stringResource(R.string.onboarding_new_body)
+            1 -> stringResource(R.string.onboarding_save_body)
+            2 -> stringResource(R.string.onboarding_history_body)
+            else -> stringResource(R.string.onboarding_zoom_body)
+        }
+        val progress = if (language == "fa") {
+            listOf("۱ از ۴", "۲ از ۴", "۳ از ۴", "۴ از ۴")[safeStep]
+        } else {
+            "${safeStep + 1} / 4"
+        }
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = onSkip,
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            CompositionLocalProvider(
+                LocalLayoutDirection provides if (language == "fa") LayoutDirection.Rtl else LayoutDirection.Ltr
+            ) {
+                // Keep this upper card well clear of floating Undo/Redo and
+                // the bottom New/Open/Save controls it describes.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, top = 150.dp, bottom = 220.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(28.dp),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp
+                    ) {
+                        Column(Modifier.padding(24.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stringResource(R.string.onboarding_title),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    progress,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                            Spacer(Modifier.height(20.dp))
+                            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(8.dp))
+                            Text(body, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
+                            Spacer(Modifier.height(20.dp))
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (safeStep > 0) {
+                                    TextButton(onClick = onBack) { Text(stringResource(R.string.onboarding_back)) }
+                                }
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) }
+                                Spacer(Modifier.width(6.dp))
+                                Button(onClick = onNext) {
+                                    Text(
+                                        stringResource(
+                                            if (safeStep == 3) R.string.onboarding_done
+                                            else R.string.onboarding_next
+                                        )
+                                    )
+                                }
                             }
                         }
                     }

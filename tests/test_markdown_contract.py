@@ -18,7 +18,7 @@ class MarkdownContractTests(unittest.TestCase):
         self.assertIn('IncludeSourceSpans.BLOCKS_AND_INLINES', code)
         self.assertIn('activeMatch: TextRange? = null', code)
 
-    def test_preview_scales_reflowed_text_without_scaling_chrome(self):
+    def test_preview_scales_document_without_scaling_app_chrome(self):
         code = (SOURCE / 'MarkdownPreview.kt').read_text()
         self.assertIn('fontSize: Float = 17f', code)
         self.assertIn('fontSize / 17f', code)
@@ -27,8 +27,13 @@ class MarkdownContractTests(unittest.TestCase):
         self.assertIn('remember(node, linkColor, codeBg, scale)', code)
         self.assertIn('fontSize = 15.sp * scale', code)
         self.assertIn('fontSize = 14.sp * scale', code)
-        self.assertNotIn('pinchScale: Float = 1f', code)
-        self.assertNotIn('.graphicsLayer {', code)
+        self.assertIn('pinchScale: Float = 1f', code)
+        self.assertIn('.graphicsLayer {', code)
+        # The temporary gesture layer belongs to the Markdown document; the
+        # application top and bottom bars stay outside MarkdownPreview.
+        activity = (SOURCE / 'MainActivity.kt').read_text()
+        chrome = activity.split('topBar = {', 1)[1].split('contentWindowInsets', 1)[0]
+        self.assertNotIn('.graphicsLayer {', chrome)
 
 
 if __name__ == '__main__':

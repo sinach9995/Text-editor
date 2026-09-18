@@ -96,4 +96,18 @@
     <string name="back">Back</string>
     <string name="new_txt">New text file (.txt)</string>
     <string name="new_md">New Markdown file (.md)</string>
+    <string name="onboarding_title">Getting started</string>
+    <string name="onboarding_new_title">New ▲</string>
+    <string name="onboarding_new_body">Tap New to start a text file. Hold it to choose a Text or Markdown file.</string>
+    <string name="onboarding_save_title">Save ▲</string>
+    <string name="onboarding_save_body">Tap Save to save the current file. Hold it for Save as and export options.</string>
+    <string name="onboarding_history_title">Undo and Redo</string>
+    <string name="onboarding_history_body">After you edit text, use the curved buttons above the bottom controls to undo or redo recent changes.</string>
+    <string name="onboarding_zoom_title">Zoom text</string>
+    <string name="onboarding_zoom_body">Place two fingers on the document and move them apart or together to make text larger or smaller.</string>
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_done">Done</string>
+    <string name="onboarding_replay">Show introductory tips again</string>
 </resources>

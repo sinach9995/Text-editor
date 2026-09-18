@@ -96,4 +96,18 @@
     <string name="back">بازگشت</string>
     <string name="new_txt">فایل متنی جدید (.txt)</string>
     <string name="new_md">فایل Markdown جدید (.md)</string>
+    <string name="onboarding_title">راهنمای شروع</string>
+    <string name="onboarding_new_title">دکمهٔ جدید ▲</string>
+    <string name="onboarding_new_body">برای ساختن فایل متنی روی جدید بزنید. برای انتخاب فایل متنی یا Markdown، دکمه را نگه دارید.</string>
+    <string name="onboarding_save_title">دکمهٔ ذخیره ▲</string>
+    <string name="onboarding_save_body">برای ذخیرهٔ فایل فعلی روی ذخیره بزنید. برای ذخیره با نام دیگر و گزینه‌های خروجی، دکمه را نگه دارید.</string>
+    <string name="onboarding_history_title">واگرد و ازنو</string>
+    <string name="onboarding_history_body">پس از ویرایش متن، از دکمه‌های خمیدهٔ بالای نوار پایین برای واگرد یا انجام دوبارهٔ تغییرهای اخیر استفاده کنید.</string>
+    <string name="onboarding_zoom_title">بزرگ‌نمایی متن</string>
+    <string name="onboarding_zoom_body">دو انگشت را روی متن بگذارید و برای بزرگ یا کوچک کردن متن، آن‌ها را از هم دور یا به هم نزدیک کنید.</string>
+    <string name="onboarding_back">قبلی</string>
+    <string name="onboarding_skip">رد کردن</string>
+    <string name="onboarding_next">بعدی</string>
+    <string name="onboarding_done">پایان</string>
+    <string name="onboarding_replay">نمایش دوباره راهنمای شروع</string>
 </resources>
