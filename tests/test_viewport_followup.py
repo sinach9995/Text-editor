@@ -31,6 +31,9 @@ class ViewportFollowup(unittest.TestCase):
         self.assertIn('MutatePriority.PreventUserInput', text)
         self.assertIn('lastPinchLayout !== layout', text)
         self.assertIn('cursorVisibilityRequest', text)
+        self.assertIn('pinchTargetFontSize', text)
+        self.assertIn('withFrameNanos { }', text)
+        self.assertNotIn('pinchVisualScale', text)
         preview = (ROOT / 'PreviewTextAnchors.kt').read_text()
         self.assertIn('correctedLayout === layout', preview)
     def test_action_label_and_arrow_are_centered_as_one_group(self):

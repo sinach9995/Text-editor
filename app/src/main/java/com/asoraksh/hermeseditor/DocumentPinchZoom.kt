@@ -13,7 +13,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 /** Single-pointer events pass through. One start/end pair owns each pinch. */
 @Composable
 fun Modifier.documentPinchZoom(
-    onZoom: (Float, Offset) -> Unit,
+    onZoom: (Float) -> Unit,
     onStart: (Offset) -> Unit,
     onEnd: () -> Unit
 ): Modifier {
@@ -38,10 +38,7 @@ fun Modifier.documentPinchZoom(
                         }
                         if (event.changes.all { it.pressed && it.previousPressed }) {
                             val zoom = event.calculateZoom()
-                            if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
-                                val centroid = pressed.fold(Offset.Zero) { sum, change -> sum + change.position } / pressed.size.toFloat()
-                                zoomCallback.value(zoom, centroid)
-                            }
+                            if (zoom.isFinite() && zoom > 0f && zoom != 1f) zoomCallback.value(zoom)
                         }
                     }
                     // Consume the trailing finger too; never click a link after pinching.

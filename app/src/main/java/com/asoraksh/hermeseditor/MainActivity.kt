@@ -35,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.geometry.Offset
@@ -70,8 +69,6 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 
@@ -254,13 +251,11 @@ class MainActivity : ComponentActivity() {
         var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinching by remember { mutableStateOf(false) }
-        // Keep typography stable while fingers are down.  Reflowing a long
-        // BasicTextField for every pointer event causes the visible jumping
-        // reported on-device.  The gesture is drawn as a GPU scale first and
-        // committed to the real font size only when the pinch ends.
-        var pinchVisualScale by remember { mutableStateOf(1f) }
-        var pinchCentroid by remember { mutableStateOf(Offset.Zero) }
-        var sourceContentSize by remember { mutableStateOf(IntSize.Zero) }
+        // A document must reflow to its actual width while zooming.  Applying
+        // graphicsLayer scaling made text escape the content column.  Coalesce
+        // many pointer samples into at most one real typography update/frame.
+        var pinchTargetFontSize by remember { mutableStateOf(fontSize) }
+        var pinchFrameJob by remember { mutableStateOf<Job?>(null) }
         var pinchLineFraction by remember { mutableStateOf(0f) }
         var pinchScrollOwner by remember { mutableStateOf<Job?>(null) }
         var lastPinchLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -322,8 +317,9 @@ class MainActivity : ComponentActivity() {
             pendingAnchor = null
             pinchScrollOwner?.cancel()
             cursorVisibilityRequest = false
-            pinchVisualScale = 1f
-            pinchCentroid = centroid
+            pinchFrameJob?.cancel()
+            pinchFrameJob = null
+            pinchTargetFontSize = fontSize
             // Cancel an existing fling/Find/BIV animation before capturing geometry.
             val scroll = if (mdPreview) previewScroll else editorScroll
             pinchScrollOwner = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -343,24 +339,32 @@ class MainActivity : ComponentActivity() {
             }
             pinching = true
         }
-        val zoomDocument: (Float, Offset) -> Unit = { factor, centroid ->
-            // Visual-only scaling during the gesture keeps the character below
-            // the fingers fixed.  Do not change fontSize here: changing it
-            // reflows wrapped lines asynchronously and makes the page jump.
-            pinchCentroid = centroid
-            val minRelativeScale = 13f / fontSize
-            val maxRelativeScale = 30f / fontSize
-            val next = (pinchVisualScale * factor).coerceIn(minRelativeScale, maxRelativeScale)
-            if (next.isFinite()) pinchVisualScale = next
+        val zoomDocument: (Float) -> Unit = { factor ->
+            // The actual text size is applied while pinching so words rewrap
+            // inside the editor width, like a message reader.  Updating at most
+            // once per rendered frame avoids repeated stale-layout corrections.
+            val next = (pinchTargetFontSize * factor).coerceIn(13f, 30f)
+            if (next.isFinite() && next != pinchTargetFontSize) {
+                pinchTargetFontSize = next
+                if (pinchFrameJob?.isActive != true) {
+                    pinchFrameJob = scope.launch {
+                        withFrameNanos { }
+                        if (pinching && fontSize != pinchTargetFontSize) {
+                            fontSize = pinchTargetFontSize
+                            // The next TextLayoutResult gets exactly one
+                            // correction from the fixed gesture-start anchor.
+                            lastPinchLayout = null
+                        }
+                        pinchFrameJob = null
+                    }
+                }
+            }
         }
         val endPinch: () -> Unit = {
-            // Make one real typography change after the fingers lift.  The
-            // existing gesture-start anchor corrects the one resulting reflow.
-            val nextFontSize = (fontSize * pinchVisualScale).coerceIn(13f, 30f)
-            val changed = nextFontSize != fontSize
-            pinchVisualScale = 1f
-            if (changed) {
-                fontSize = nextFontSize
+            pinchFrameJob?.cancel()
+            pinchFrameJob = null
+            if (fontSize != pinchTargetFontSize) {
+                fontSize = pinchTargetFontSize
                 // Force exactly one correction when the final layout arrives.
                 lastPinchLayout = null
             }
@@ -517,8 +521,6 @@ class MainActivity : ComponentActivity() {
                             fontSize = fontSize,
                             scrollState = previewScroll, anchors = previewAnchors,
                             textAnchors = previewTextAnchors,
-                            pinchScale = pinchVisualScale,
-                            pinchCentroid = pinchCentroid,
                             modifier = Modifier.fillMaxSize().documentPinchZoom(zoomDocument, startPinch, endPinch)
                         )
                     }
@@ -567,22 +569,6 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth()
                             .onFocusChanged { editorFocused = it.isFocused }
                             .bringIntoViewRequester(cursorRequester)
-                            .onSizeChanged { sourceContentSize = it }
-                            .graphicsLayer {
-                                // BasicTextField is a very tall child inside a
-                                // vertical scroll container.  Its local pivot
-                                // must therefore include the current scroll
-                                // amount, otherwise scaling appears to jump.
-                                val width = sourceContentSize.width.toFloat().coerceAtLeast(1f)
-                                val height = sourceContentSize.height.toFloat().coerceAtLeast(1f)
-                                val pivotX = ((pinchCentroid.x - with(density) { 20.dp.toPx() }) / width)
-                                    .coerceIn(0f, 1f)
-                                val pivotY = ((editorScroll.value + pinchCentroid.y - textTop) / height)
-                                    .coerceIn(0f, 1f)
-                                scaleX = pinchVisualScale
-                                scaleY = pinchVisualScale
-                                transformOrigin = TransformOrigin(pivotX, pivotY)
-                            }
                             .onGloballyPositioned {
                                 val anchor = pinchAnchor
                                 val layout = textLayout
