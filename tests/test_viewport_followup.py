@@ -33,8 +33,9 @@ class ViewportFollowup(unittest.TestCase):
         self.assertIn('cursorVisibilityRequest', text)
         preview = (ROOT / 'PreviewTextAnchors.kt').read_text()
         self.assertIn('correctedLayout === layout', preview)
-    def test_word_centered_independently(self):
+    def test_action_label_and_arrow_are_centered_as_one_group(self):
         text = (ROOT / 'MainActivity.kt').read_text()
-        self.assertEqual(text.count('CenteredActionLabel(stringResource('), 2)
-        self.assertIn('label.placeRelative((width - label.width) / 2', text)
+        self.assertEqual(text.count('CombinedActionLabel(stringResource('), 2)
+        self.assertIn('Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center)', text)
+        self.assertIn('Spacer(Modifier.width(3.dp))', text)
 if __name__ == '__main__': unittest.main()
