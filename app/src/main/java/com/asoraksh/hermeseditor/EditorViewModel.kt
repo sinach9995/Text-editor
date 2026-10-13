@@ -196,7 +196,7 @@ class EditorViewModel : ViewModel() {
         isDirty = false
     }
 
-    fun setTitle(newTitle: String) {
+    fun renameTitle(newTitle: String) {
         if (title != newTitle) title = newTitle
     }
 

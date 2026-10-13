@@ -241,7 +241,7 @@ class MainActivity : ComponentActivity() {
                 fallbackSaveAsAfterDenied(failure)
             } else {
                 vm.setDocumentUri(uri)
-                vm.setTitle(displayName(uri))
+                vm.renameTitle(displayName(uri))
                 vm.markClean()
                 notifyMessage(getString(R.string.saved, displayName(uri)))
             }
@@ -259,7 +259,7 @@ class MainActivity : ComponentActivity() {
             }
             if (ok) {
                 vm.setDocumentUri(uri)
-                vm.setTitle(displayName(uri))
+                vm.renameTitle(displayName(uri))
                 vm.markClean()
                 notifyMessage(getString(R.string.saved_copy, displayName(uri)))
             } else {
