@@ -48,7 +48,6 @@ import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.ext.task.list.items.TaskListItemsExtension
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
-import org.commonmark.node.BulletListMarker
 import org.commonmark.node.Code
 import org.commonmark.node.Emphasis
 import org.commonmark.node.FencedCodeBlock
@@ -60,7 +59,6 @@ import org.commonmark.node.Link
 import org.commonmark.node.ListItem
 import org.commonmark.node.Node
 import org.commonmark.node.OrderedList
-import org.commonmark.node.OrderedListMarker
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.StrongEmphasis
@@ -99,28 +97,43 @@ fun markdownToPlainText(src: String): String {
     }
     // Keep list structure in the export: a plain-text copy of a bulleted or
     // task list must still read as a list.
-    fun itemPrefix(item: ListItem): String {
-        var marker: Node? = item.firstChild
-        while (marker != null) {
-            if (marker is TaskListItemMarker) {
-                val checked = (marker as TaskListItemMarker).isChecked
-                return "[" + (if (checked) "x" else " ") + "] "
+    fun itemPrefix(item: ListItem, ordinal: Int): String {
+        // Task marker wins: "[x] " / "[ ] ".
+        var child: Node? = item.firstChild
+        while (child != null) {
+            if (child is TaskListItemMarker) {
+                return "[" + (if (child.isChecked) "x" else " ") + "] "
             }
-            if (marker is BulletListMarker || marker is OrderedListMarker) {
-                val text = marker.literal.orEmpty()
-                return if (text.isNotEmpty()) text + " " else "- "
-            }
-            marker = marker.next
+            child = child.next
         }
-        return "- "
+        // commonmark 0.30 keeps the marker on the parent list, not on a node
+        // inside the item: BulletList.getMarker() and
+        // OrderedList.getMarkerStartNumber() + getMarkerDelimiter().
+        return when (val list = item.parent) {
+            is OrderedList -> {
+                val start = list.markerStartNumber ?: 1
+                val delim = list.markerDelimiter ?: "."
+                (start + ordinal - 1).toString() + delim + " "
+            }
+            is BulletList -> {
+                val m = list.marker
+                (if (m.isNullOrEmpty()) "-" else m) + " "
+            }
+            else -> "- "
+        }
     }
     fun blocks(n: Node) {
         var c: Node? = n.firstChild
+        var ordinal = 0
         while (c != null) {
             val cur = c
             when (cur) {
                 is Paragraph, is Heading -> { inline(cur); sb.append("\n\n") }
-                is ListItem -> { sb.append(itemPrefix(cur)); inline(cur); sb.append('\n') }
+                is ListItem -> {
+                    sb.append(itemPrefix(cur, ++ordinal))
+                    inline(cur)
+                    sb.append('\n')
+                }
                 is FencedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is IndentedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is TaskListItemMarker -> { }

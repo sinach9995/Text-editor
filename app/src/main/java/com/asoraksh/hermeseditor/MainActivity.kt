@@ -228,17 +228,23 @@ class MainActivity : ComponentActivity() {
         // file cannot be reopened after process death.
         takePersistablePermissions(uri)
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
+            val result: Result<Unit> = withContext(Dispatchers.IO) {
                 runCatching {
                     requireNotNull(contentResolver.openOutputStream(uri, "wt"))
                         .bufferedWriter(Charsets.UTF_8).use { it.write(draft) }
                 }
             }
-            result.exceptionOrNull()?.let { fallbackSaveAsAfterDenied(it); return@launch }
-            vm.setDocumentUri(uri)
-            vm.setTitle(displayName(uri))
-            vm.markClean()
-            notifyMessage(getString(R.string.saved, displayName(uri)))
+            val failure = result.exceptionOrNull()
+            if (failure != null) {
+                // ACTION_VIEW/ACTION_SEND grants expire: keep the text and let the
+                // user pick a new target instead of losing the write.
+                fallbackSaveAsAfterDenied(failure)
+            } else {
+                vm.setDocumentUri(uri)
+                vm.setTitle(displayName(uri))
+                vm.markClean()
+                notifyMessage(getString(R.string.saved, displayName(uri)))
+            }
         }
     }
     private fun saveAsToUri(uri: Uri) {
