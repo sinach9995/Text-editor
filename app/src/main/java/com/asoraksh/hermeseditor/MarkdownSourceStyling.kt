@@ -31,8 +31,11 @@ import java.util.ArrayDeque
  * offsets both count UTF-16 code units (including CRLF, Persian and emoji).
  * Recreate/remember with ALL constructor arguments as keys, particularly the
  * theme colors and font size. No color-dependent spans are cached globally.
+ *
+ * Declared `data class` on purpose: value equality is what lets a `remember`
+ * key skip re-parsing when none of these arguments changed.
  */
-class MarkdownSourceTransformation(
+data class MarkdownSourceTransformation(
     private val linkColor: Color,
     private val codeBg: Color,
     private val baseFontSize: TextUnit,

@@ -95,13 +95,45 @@ fun markdownToPlainText(src: String): String {
             c = cur.next
         }
     }
+    // Keep list structure in the export: a plain-text copy of a bulleted or
+    // task list must still read as a list.
+    fun itemPrefix(item: ListItem, ordinal: Int): String {
+        // Task marker wins: "[x] " / "[ ] ".
+        var child: Node? = item.firstChild
+        while (child != null) {
+            if (child is TaskListItemMarker) {
+                return "[" + (if (child.isChecked) "x" else " ") + "] "
+            }
+            child = child.next
+        }
+        // commonmark 0.30 keeps the marker on the parent list, not on a node
+        // inside the item: BulletList.getMarker() and
+        // OrderedList.getMarkerStartNumber() + getMarkerDelimiter().
+        return when (val list = item.parent) {
+            is OrderedList -> {
+                val start = list.markerStartNumber ?: 1
+                val delim = list.markerDelimiter ?: "."
+                (start + ordinal - 1).toString() + delim + " "
+            }
+            is BulletList -> {
+                val m = list.marker
+                (if (m.isNullOrEmpty()) "-" else m) + " "
+            }
+            else -> "- "
+        }
+    }
     fun blocks(n: Node) {
         var c: Node? = n.firstChild
+        var ordinal = 0
         while (c != null) {
             val cur = c
             when (cur) {
                 is Paragraph, is Heading -> { inline(cur); sb.append("\n\n") }
-                is ListItem -> { inline(cur); sb.append('\n') }
+                is ListItem -> {
+                    sb.append(itemPrefix(cur, ++ordinal))
+                    inline(cur)
+                    sb.append('\n')
+                }
                 is FencedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is IndentedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is TaskListItemMarker -> { }
