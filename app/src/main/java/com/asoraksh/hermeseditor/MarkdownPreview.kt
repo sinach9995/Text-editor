@@ -48,6 +48,7 @@ import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.ext.task.list.items.TaskListItemsExtension
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.BulletList
+import org.commonmark.node.BulletListMarker
 import org.commonmark.node.Code
 import org.commonmark.node.Emphasis
 import org.commonmark.node.FencedCodeBlock
@@ -59,6 +60,7 @@ import org.commonmark.node.Link
 import org.commonmark.node.ListItem
 import org.commonmark.node.Node
 import org.commonmark.node.OrderedList
+import org.commonmark.node.OrderedListMarker
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.StrongEmphasis
@@ -95,13 +97,30 @@ fun markdownToPlainText(src: String): String {
             c = cur.next
         }
     }
+    // Keep list structure in the export: a plain-text copy of a bulleted or
+    // task list must still read as a list.
+    fun itemPrefix(item: ListItem): String {
+        var marker: Node? = item.firstChild
+        while (marker != null) {
+            if (marker is TaskListItemMarker) {
+                val checked = (marker as TaskListItemMarker).isChecked
+                return "[" + (if (checked) "x" else " ") + "] "
+            }
+            if (marker is BulletListMarker || marker is OrderedListMarker) {
+                val text = marker.literal.orEmpty()
+                return if (text.isNotEmpty()) text + " " else "- "
+            }
+            marker = marker.next
+        }
+        return "- "
+    }
     fun blocks(n: Node) {
         var c: Node? = n.firstChild
         while (c != null) {
             val cur = c
             when (cur) {
                 is Paragraph, is Heading -> { inline(cur); sb.append("\n\n") }
-                is ListItem -> { inline(cur); sb.append('\n') }
+                is ListItem -> { sb.append(itemPrefix(cur)); inline(cur); sb.append('\n') }
                 is FencedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is IndentedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is TaskListItemMarker -> { }

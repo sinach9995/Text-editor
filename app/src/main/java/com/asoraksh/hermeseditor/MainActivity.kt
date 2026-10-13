@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import java.util.Locale
+import java.io.File
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextLayoutResult
@@ -68,6 +69,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
@@ -79,9 +84,11 @@ private enum class AppTheme { DARK, LIGHT }
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("hermes_editor", MODE_PRIVATE) }
-    private var documentUri: Uri? = null
-    private var updateEditor: ((String, String, Boolean) -> Unit)? = null
-    private var pendingDocument: Pair<String, String>? = null
+
+    // One source of truth shared by the Activity-level result callbacks and
+    // the Compose editor. Survives rotation and recreate() on a language switch.
+    private val vm: EditorViewModel by lazy { ViewModelProvider(this)[EditorViewModel::class.java] }
+
     private val messages = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private fun notifyMessage(message: String) { messages.trySend(message) }
 
@@ -94,14 +101,35 @@ class MainActivity : ComponentActivity() {
 
     private fun msg(en: String, fa: String) = if ((prefs.getString("lang", "en") ?: "en") == "fa") fa else en
 
+    /**
+     * Take persistable READ first, then attempt WRITE in its own guarded call.
+     * A single read|write request throws SecurityException as a unit on
+     * providers that granted only read, which would forfeit the read grant too.
+     */
+    private fun takePersistablePermissions(uri: Uri) {
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        catch (_: SecurityException) { }
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        catch (_: SecurityException) { }
+    }
+
     private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
-            try {
-                contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val text = contentResolver.openInputStream(it)?.bufferedReader(Charsets.UTF_8)?.use { reader -> reader.readText() } ?: ""
-                documentUri = it
-                updateEditor?.invoke(text, displayName(it), true)
-            } catch (error: Exception) { updateEditor?.invoke("", msg("Could not open file", "فایل باز نشد"), false) }
+            takePersistablePermissions(it)
+            lifecycleScope.launch {
+                val text = withContext(Dispatchers.IO) {
+                    runCatching {
+                        contentResolver.openInputStream(it)?.bufferedReader(Charsets.UTF_8)?.use { r -> r.readText() }
+                    }.getOrNull()
+                }
+                if (text == null) {
+                    // Leave the current buffer untouched; clearing it here would
+                    // destroy whatever the user was working on.
+                    notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                } else {
+                    vm.setDocument(it, displayName(it), text)
+                }
+            }
         }
     }
     private val createDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -114,12 +142,20 @@ class MainActivity : ComponentActivity() {
         uri?.let { saveAsToUri(it) }
     }
     private val exportDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        uri?.let {
-            try {
-                val plain = markdownToPlainText(prefs.getString("draft", "") ?: "")
-                requireNotNull(contentResolver.openOutputStream(it, "wt")).bufferedWriter(Charsets.UTF_8).use { w -> w.write(plain) }
-                notifyMessage(getString(R.string.exported, displayName(it)))
-            } catch (_: Exception) { notifyMessage(getString(R.string.save_failed)) }
+        uri?.let { target ->
+            val plain = markdownToPlainText(vm.editor.text)
+            lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching {
+                        requireNotNull(contentResolver.openOutputStream(target, "wt"))
+                            .bufferedWriter(Charsets.UTF_8).use { w -> w.write(plain) }
+                    }.isSuccess
+                }
+                notifyMessage(
+                    if (ok) getString(R.string.exported, displayName(target))
+                    else getString(R.string.save_failed)
+                )
+            }
         }
     }
 
@@ -127,44 +163,87 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        handleIncomingIntent(intent)
+        // Seed the ViewModel once. On a recreation (rotation, or recreate() on a
+        // language switch) savedInstanceState is non-null and the launch intent
+        // must NOT be replayed, or it would overwrite unsaved edits with the
+        // on-disk copy. Later intents arrive through onNewIntent.
+        if (savedInstanceState == null) {
+            val legacy = prefs.getString("draft", "")
+            vm.configureDraftFile(File(filesDir, "draft.txt"), legacy)
+            if (legacy != null) prefs.edit().remove("draft").apply()
+            handleIncomingIntent(intent)
+        }
         setContent { HermesEditor() }
     }
 
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleIncomingIntent(intent) }
-    override fun onPause() { super.onPause(); cacheDraft() }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+    override fun onPause() { super.onPause(); vm.flushAutosave() }
 
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
-        try {
-            // File-manager shares do not always grant persistent access; reading must still work.
-            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) { }
-            val text = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-            documentUri = uri
-            val document = text to displayName(uri)
-            pendingDocument = document
-            updateEditor?.invoke(document.first, document.second, true)
-        } catch (_: Exception) { }
+        // File-manager shares do not always grant persistent access; reading
+        // must still work, so the permission calls are individually guarded.
+        takePersistablePermissions(uri)
+        lifecycleScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                }.getOrNull()
+            }
+            // On failure leave the current document alone rather than blanking it.
+            if (text != null) vm.setDocument(uri, displayName(uri), text)
+        }
     }
     private fun saveToUri(uri: Uri) {
-        val draft = prefs.getString("draft", "") ?: ""
-        try {
-            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) } ?: throw IllegalStateException("unwritable")
-            documentUri = uri
-            updateEditor?.invoke(draft, displayName(uri), false)
+        val draft = vm.editor.text
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    requireNotNull(contentResolver.openOutputStream(uri, "wt"))
+                        .bufferedWriter(Charsets.UTF_8).use { it.write(draft) }
+                }
+            }
+            result.exceptionOrNull()?.let { fallbackSaveAsAfterDenied(it); return@launch }
+            vm.setDocumentUri(uri)
+            vm.setTitle(displayName(uri))
+            vm.markClean()
             notifyMessage(getString(R.string.saved, displayName(uri)))
-        } catch (_: Exception) { notifyMessage(getString(R.string.save_failed)) }
+        }
     }
     private fun saveAsToUri(uri: Uri) {
-        val draft = prefs.getString("draft", "") ?: ""
-        try {
-            contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(draft) } ?: throw IllegalStateException("unwritable")
-            documentUri = uri
-            updateEditor?.invoke(draft, displayName(uri), false)
-            notifyMessage(getString(R.string.saved_copy, displayName(uri)))
-        } catch (_: Exception) { notifyMessage(getString(R.string.save_failed)) }
+        val draft = vm.editor.text
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    requireNotNull(contentResolver.openOutputStream(uri, "wt"))
+                        .bufferedWriter(Charsets.UTF_8).use { it.write(draft) }
+                }.isSuccess
+            }
+            if (ok) {
+                vm.setDocumentUri(uri)
+                vm.setTitle(displayName(uri))
+                vm.markClean()
+                notifyMessage(getString(R.string.saved_copy, displayName(uri)))
+            } else {
+                fallbackSaveAsAfterDenied(null)
+            }
+        }
     }
-    private fun cacheDraft(text: String? = null) { prefs.edit().putString("draft", text ?: prefs.getString("draft", "") ?: "").apply() }
+
+    /**
+     * An ACTION_VIEW / ACTION_SEND share is frequently read-only. Rather than
+     * reporting a bare failure, ask the editor surface to open the Save As
+     * dialog so the user can write to a location they do control.
+     */
+    private val saveAsFallback = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private fun fallbackSaveAsAfterDenied(cause: Throwable?) {
+        notifyMessage(msg("File is read-only, choose Save As", "فایل فقط‌خواندنی است، ذخیره به‌عنوان بزنید"))
+        saveAsFallback.trySend(Unit)
+    }
     private fun baseName(title: String) = title.substringBeforeLast('.', title).ifBlank { "document" }
     private fun displayName(uri: Uri): String {
         try {
@@ -216,9 +295,13 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun HermesEditor() {
-        var editor by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(prefs.getString("draft", "") ?: "")) }
+        val vm = this.vm
+        val editor by vm::editor
+        val title by vm::title
         val text = editor.text
-        val history = remember { EditorHistory() }
+        val history = vm.history
+        val historyTick by vm::historyTick
+        val isDirty by vm::isDirty
         var pastedEdit by remember { mutableStateOf(false) }
         val systemClipboard = androidx.compose.ui.platform.LocalClipboardManager.current
         val editorClipboard = remember(systemClipboard, history) {
@@ -232,7 +315,6 @@ class MainActivity : ComponentActivity() {
                 override fun hasText(): Boolean = systemClipboard.hasText()
             }
         }
-        var historyTick by remember { mutableStateOf(0) }
         val snackbar = remember { SnackbarHostState() }
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
@@ -276,10 +358,6 @@ class MainActivity : ComponentActivity() {
             return DocumentAnchor(offset, y)
         }
 
-        fun snapshot(value: TextFieldValue) = EditorSnapshot(value.text, value.selection.start, value.selection.end)
-        fun restore(value: EditorSnapshot?) {
-            if (value != null) { editor = TextFieldValue(value.text, TextRange(value.start, value.end)); cacheDraft(value.text); historyTick++ }
-        }
         LaunchedEffect(Unit) { for (message in messages) { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(message, duration = SnackbarDuration.Short) } }
         LaunchedEffect(activeMatch) {
             withFrameNanos { }
@@ -290,7 +368,6 @@ class MainActivity : ComponentActivity() {
                 editorScroll.animateScrollTo(y.coerceIn(0, editorScroll.maxValue))
             }
         }
-        var title by rememberSaveable { mutableStateOf("untitled.txt") }
         var selectedTheme by rememberSaveable { mutableStateOf(if (prefs.getString("theme", "dark") == "light") AppTheme.LIGHT else AppTheme.DARK) }
         // Read the saved language again after recreate(). rememberSaveable
         // restored English after the first Persian choice and mixed Farsi
@@ -422,29 +499,25 @@ class MainActivity : ComponentActivity() {
             }
             pendingAnchor = null
         }
-        var showLaunch by remember { mutableStateOf(true) }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
-        fun update(newText: String, newTitle: String, newSession: Boolean) {
-            title = newTitle; cacheDraft(newText)
-            if (newSession) {
-                editor = TextFieldValue(newText)
-                history.reset(snapshot(editor)); historyTick++
-                finding = false; query = ""; matchIndex = 0
-                mdPreview = isMarkdownName(newTitle)
-                previewAnchors.clear()
-                pendingAnchor = DocumentAnchor(0, textTop)
-                scope.launch { editorScroll.scrollTo(0); previewScroll.scrollTo(0) }
-                dirSession++
-            }
+        // Reset the per-session editor surface after the ViewModel swaps in a
+        // different document (open, or a new file).
+        fun onNewDocumentSession(newTitle: String) {
+            finding = false; query = ""; matchIndex = 0
+            mdPreview = vm.forceSourceMode.not() && isMarkdownName(newTitle)
+            previewAnchors.clear()
+            pendingAnchor = DocumentAnchor(0, textTop)
+            scope.launch { editorScroll.scrollTo(0); previewScroll.scrollTo(0) }
+            dirSession++
         }
         fun newFile(markdown: Boolean) {
             val action: () -> Unit = {
-                documentUri = null
-                update("", if (markdown) "untitled.md" else "untitled.txt", true)
-                mdPreview = false
+                // vm.newDocument bumps documentSession, which drives the reset
+                // (including mdPreview = isMarkdownName(newTitle)).
+                vm.newDocument(markdown)
             }
-            if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else action()
+            if (isDirty) { discardAction = action; showDiscardDialog = true } else action()
         }
         fun setLang(code: String) {
             if (code == lang) return
@@ -478,10 +551,13 @@ class MainActivity : ComponentActivity() {
             onboardingStep = 0
             showOnboarding = true
         }
-        LaunchedEffect(Unit) {
-            updateEditor = ::update
-            pendingDocument?.let { update(it.first, it.second, true); pendingDocument = null }
-        }
+        // The ViewModel bumps documentSession on every open/new, so this fires
+        // exactly once per session change -- including a re-open of the file
+        // already open, which a (title, uri) key would have missed.
+        val documentSession by vm::documentSession
+        LaunchedEffect(documentSession) { onNewDocumentSession(vm.title) }
+        // Ask the editor surface to open Save As after a denied write.
+        LaunchedEffect(Unit) { for (unit in saveAsFallback) { showFormatChoice = true } }
         // Suggest a writing direction only when the opened document clearly
         // mismatches the currently active direction. Tracked per opened
         // document session (not filename), so two files sharing a name each
@@ -494,14 +570,11 @@ class MainActivity : ComponentActivity() {
                 dirSuggest = null
             }
         }
-        DisposableEffect(Unit) { onDispose { updateEditor = null; cacheDraft(text) } }
-        if (showLaunch) {
-            LaunchFrame()
-            LaunchedEffect(Unit) { showLaunch = false }
-            return
-        }
         MaterialTheme(colorScheme = colors) {
-            BackHandler { cacheDraft(text); finish() }
+            BackHandler {
+                // Dismiss the Find bar before leaving the app.
+                if (finding) finding = false else { vm.flushAutosave(); finish() }
+            }
             Scaffold(
                 containerColor = colors.background,
                 snackbarHost = { SnackbarHost(snackbar) },
@@ -531,8 +604,8 @@ class MainActivity : ComponentActivity() {
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         onNew = { newFile(false) },
                         onNewMarkdown = { newFile(true) },
-                        onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (text.isNotEmpty()) { discardAction = action; showDiscardDialog = true } else { action() } },
-                        onQuickSave = { documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
+                        onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (isDirty) { discardAction = action; showDiscardDialog = true } else { action() } },
+                        onQuickSave = { vm.documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
                         onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
                         onExport = { exportDocument.launch(baseName(title) + ".txt") }
                     )
@@ -582,21 +655,21 @@ class MainActivity : ComponentActivity() {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
-                            history.record(snapshot(editor), snapshot(newValue), android.os.SystemClock.uptimeMillis(), allowCoalescing = !pastedEdit)
+                            vm.onTextChanged(newValue, allowCoalescing = !pastedEdit)
                             pastedEdit = false
-                            editor = newValue
-                            cacheDraft(newValue.text)
                             if (finding && matches.isNotEmpty() && newValue.text != text) matchIndex = 0
                         },
                         textStyle = TextStyle(color = colors.onBackground, fontSize = fontSize.sp, lineHeight = (fontSize * 1.5f).sp, textDirection = docDirection, textAlign = docAlign),
                         cursorBrush = SolidColor(colors.primary),
-                        visualTransformation = MarkdownSourceTransformation(
-                            linkColor = colors.primary,
-                            codeBg = colors.surfaceVariant,
-                            baseFontSize = fontSize.sp,
-                            markdown = isMarkdownName(title),
-                            activeMatch = activeMatch
-                        ),
+                        visualTransformation = remember(colors.primary, colors.surfaceVariant, fontSize, title, activeMatch) {
+                            MarkdownSourceTransformation(
+                                linkColor = colors.primary,
+                                codeBg = colors.surfaceVariant,
+                                baseFontSize = fontSize.sp,
+                                markdown = isMarkdownName(title),
+                                activeMatch = activeMatch
+                            )
+                        },
                         onTextLayout = { textLayout = it },
                         modifier = Modifier.fillMaxWidth()
                             .onFocusChanged { editorFocused = it.isFocused }
@@ -644,7 +717,7 @@ class MainActivity : ComponentActivity() {
                 if (!finding && !mdPreview) {
                     Box(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 4.dp)) {
                         FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
-                            { restore(history.undo(snapshot(editor))) }, { restore(history.redo(snapshot(editor))) })
+                            { vm.undo() }, { vm.redo() })
                     }
                 }
                 Box(Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -658,7 +731,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
-            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; documentUri = null; update("", "untitled.txt", true) }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
+            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; vm.newDocument(false) }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
             if (dirSuggest != null) {
                 val toRtl = dirSuggest == true
                 AlertDialog(
@@ -733,16 +806,6 @@ class MainActivity : ComponentActivity() {
             drawCircle(tint, r - w, style = Stroke(w))
             drawLine(tint, Offset(center.x - r, center.y), Offset(center.x + r, center.y), w)
             drawOval(tint, Offset(center.x - r * 0.42f, center.y - r), Size(r * 0.84f, r * 2f), style = Stroke(w))
-        }
-    }
-
-    @Composable private fun LaunchFrame() {
-        Box(Modifier.fillMaxSize().background(colorResource(R.color.splash_background)), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor", modifier = Modifier.size(120.dp).clip(RoundedCornerShape(28.dp)))
-                Spacer(Modifier.height(20.dp))
-                Text("Hermes Text Editor", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            }
         }
     }
 
