@@ -31,6 +31,19 @@ import java.io.File
  *    thread-safe (raw ArrayDeque), so record/reset/undo/redo stay on Main.
  *  - Only stream reads/writes and the draft file write hop to Dispatchers.IO.
  *    Text is snapshotted on Main before being handed to an IO coroutine.
+ *
+ * Cold-start restore (in priority order):
+ *  1. draft.txt exists -> unsaved edits on top of the last document, so restore
+ *     the draft text AND the remembered uri/title. isDirty = true, so Save
+ *     overwrites the right file.
+ *  2. no draft but a remembered uri -> re-read that file on IO, isDirty = false.
+ *  3. neither -> empty untitled document.
+ * A remembered uri that no longer resolves (file deleted, grant expired) is
+ * forgotten and the editor falls back cleanly to an empty untitled document.
+ *
+ * An incoming ACTION_VIEW intent is applied by the Activity through
+ * setDocument(), which supersedes any restore still in flight: the restore
+ * generation is bumped so a late-finishing read cannot overwrite the intent.
  */
 class EditorViewModel : ViewModel() {
 
@@ -70,6 +83,14 @@ class EditorViewModel : ViewModel() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var autosaveJob: Job? = null
     private var draftFile: File? = null
+    private var restored = false
+    private var restoreGeneration = 0
+    private var store: SessionStore? = null
+
+    /** Injected by the Activity; lets this class persist identity without a Context. */
+    fun attachStore(sessionStore: SessionStore) {
+        store = sessionStore
+    }
 
     fun snapshot(): EditorSnapshot = EditorSnapshot(editor.text, editor.selection.start, editor.selection.end)
 
@@ -77,30 +98,94 @@ class EditorViewModel : ViewModel() {
         EditorSnapshot(value.text, value.selection.start, value.selection.end)
 
     /**
-     * Called once from the Activity before the first composition. Restores a
-     * previous session from filesDir, or migrates a legacy SharedPreferences
-     * draft written by an older build.
+     * Called once from the Activity before the first composition. Restores the
+     * previous session: the recovery draft when there is one, otherwise the
+     * document the user last had open.
+     *
+     * [readUri] performs the actual stream read on IO and returns null when the
+     * uri is gone or the grant expired. It is a function rather than a direct
+     * contentResolver call so this class stays Context-free and unit-testable.
      */
-    fun configureDraftFile(file: File, legacyDraft: String?) {
-        if (draftFile != null) return
-        draftFile = file
-        val restored = if (file.exists()) {
-            runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
-        } else {
+    fun restoreSession(
+        draftFile: File,
+        legacyDraft: String?,
+        lastUri: Uri?,
+        lastTitle: String?,
+        readUri: (Uri) -> String?,
+    ) {
+        if (restored) return
+        restored = true
+        this.draftFile = draftFile
+
+        var draft = if (draftFile.exists()) {
+            runCatching { draftFile.readText(Charsets.UTF_8) }.getOrNull()
+        } else null
+
+        // An empty draft.txt means "saved cleanly", not "user erased everything":
+        // markClean() deletes the file, so a zero-length survivor is stale state
+        // and must not resurrect as an empty dirty document.
+        if (draft != null && draft.isEmpty()) draft = null
+
+        if (draft == null && !legacyDraft.isNullOrEmpty()) {
             // One-time migration so an upgrading user does not lose an active draft.
-            legacyDraft?.takeIf { it.isNotEmpty() }?.also { legacy ->
-                runCatching { file.writeText(legacy, Charsets.UTF_8) }
-            }
+            draft = legacyDraft.takeIf { it.isNotEmpty() }
+            if (draft != null) runCatching { draftFile.writeText(draft, Charsets.UTF_8) }
         }
-        if (restored != null) {
-            editor = TextFieldValue(restored)
+
+        if (draft != null) {
+            // Unsaved edits existed on top of the remembered document.
+            if (lastUri != null && lastTitle != null) {
+                documentUri = lastUri
+                title = lastTitle
+            }
+            editor = TextFieldValue(draft)
             history.reset(snapshot())
             historyTick++
+            documentSession++
             isDirty = true
+            return
+        }
+
+        if (lastUri == null || lastTitle == null) return
+
+        // No unsaved work: reopen the last document. Read on IO, apply on Main.
+        val generation = ++restoreGeneration
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { runCatching { readUri(lastUri) }.getOrNull() }
+            if (generation != restoreGeneration) return@launch
+            if (text == null) {
+                // Unreachable uri: forget it rather than leaving a dead document.
+                forgetLastDocument()
+                editor = TextFieldValue("")
+                title = UNTOOLED_TXT
+                documentUri = null
+                history.reset(snapshot())
+                historyTick++
+                documentSession++
+                isDirty = false
+                return@launch
+            }
+            documentUri = lastUri
+            title = lastTitle
+            editor = TextFieldValue(text)
+            history.reset(snapshot())
+            historyTick++
+            documentSession++
+            isDirty = false
         }
     }
 
+    /** Clears the remembered uri/title. New and Discard both call this. */
+    fun forgetLastDocument() {
+        store?.clearLastDocument()
+    }
+
     fun setDocument(uri: Uri?, newTitle: String, text: String) {
+        // An explicit open (user action or incoming ACTION_VIEW) wins over any
+        // restore still in flight; without this a slow read of last_uri could
+        // land afterwards and overwrite the document the user just opened.
+        restoreGeneration++
+        restored = true
         documentUri = uri
         title = newTitle
         editor = TextFieldValue(text)
@@ -121,6 +206,8 @@ class EditorViewModel : ViewModel() {
 
     fun markClean() {
         isDirty = false
+        // Remember the document identity so the next cold start can reopen it.
+        store?.let { s -> documentUri?.let { s.saveLastDocument(it, title) } }
         // The document is now on disk, so the recovery copy is redundant. Leaving
         // it behind would make the next cold start reopen saved text as "unsaved".
         autosaveJob?.cancel()
@@ -129,6 +216,9 @@ class EditorViewModel : ViewModel() {
     }
 
     fun newDocument(markdown: Boolean) {
+        restoreGeneration++
+        restored = true
+        forgetLastDocument()
         documentUri = null
         title = if (markdown) UNTOOLED_MD else UNTOOLED_TXT
         editor = TextFieldValue("")

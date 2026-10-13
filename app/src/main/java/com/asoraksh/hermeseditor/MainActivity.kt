@@ -169,9 +169,15 @@ class MainActivity : ComponentActivity() {
         // on-disk copy. Later intents arrive through onNewIntent.
         if (savedInstanceState == null) {
             val legacy = prefs.getString("draft", "")
-            vm.configureDraftFile(File(filesDir, "draft.txt"), legacy)
             if (legacy != null) prefs.edit().remove("draft").apply()
-            handleIncomingIntent(intent)
+            vm.attachStore(PrefsSessionStore(this))
+
+            // An incoming ACTION_VIEW/SEND must win over the cold-start restore,
+            // so it is handled first: it bumps the restore generation and makes
+            // any in-flight last_uri read discard its result.
+            val incoming = intent?.takeIf { it.data != null }
+            handleIncomingIntent(incoming)
+            if (incoming == null) restoreLastSession(legacy)
         }
         setContent { HermesEditor() }
     }
@@ -182,6 +188,24 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
     }
     override fun onPause() { super.onPause(); vm.flushAutosave() }
+
+    /**
+     * Cold start with no incoming intent: reopen the remembered document, or the
+     * recovery draft when there are unsaved edits. The read happens on IO and
+     * an unreadable uri clears the remembered identity instead of crashing.
+     */
+    private fun restoreLastSession(legacyDraft: String?) {
+        val store = PrefsSessionStore(this)
+        val last = store.loadLastDocument()
+        vm.restoreSession(
+            draftFile = File(filesDir, "draft.txt"),
+            legacyDraft = legacyDraft,
+            lastUri = last?.first,
+            lastTitle = last?.second,
+        ) { uri ->
+            contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+        }
+    }
 
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
@@ -200,6 +224,9 @@ class MainActivity : ComponentActivity() {
     }
     private fun saveToUri(uri: Uri) {
         val draft = vm.editor.text
+        // A CreateDocument grant is temporary: without persisting it here the
+        // file cannot be reopened after process death.
+        takePersistablePermissions(uri)
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -216,6 +243,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun saveAsToUri(uri: Uri) {
         val draft = vm.editor.text
+        takePersistablePermissions(uri)
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
