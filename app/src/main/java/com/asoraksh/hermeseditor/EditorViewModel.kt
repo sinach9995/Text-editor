@@ -92,6 +92,15 @@ class EditorViewModel : ViewModel() {
         store = sessionStore
     }
 
+    /**
+     * Injected by the Activity on every create. The recovery file is attached
+     * separately from [restoreSession] because a session opened from a share
+     * intent never restores anything, yet still needs crash recovery.
+     */
+    fun attachDraft(recoveryFile: File) {
+        draftFile = recoveryFile
+    }
+
     fun snapshot(): EditorSnapshot = EditorSnapshot(editor.text, editor.selection.start, editor.selection.end)
 
     private fun of(value: TextFieldValue) =
@@ -113,44 +122,52 @@ class EditorViewModel : ViewModel() {
         lastTitle: String?,
         readUri: (Uri) -> String?,
     ) {
+        // Attach before the idempotence guard: a session that already has a
+        // document (rotation, or a share that arrived first) still needs the
+        // recovery file for autosave.
+        this.draftFile = draftFile
         if (restored) return
         restored = true
-        this.draftFile = draftFile
-
-        var draft = if (draftFile.exists()) {
-            runCatching { draftFile.readText(Charsets.UTF_8) }.getOrNull()
-        } else null
-
-        // An empty draft.txt means "saved cleanly", not "user erased everything":
-        // markClean() deletes the file, so a zero-length survivor is stale state
-        // and must not resurrect as an empty dirty document.
-        if (draft != null && draft.isEmpty()) draft = null
-
-        if (draft == null && !legacyDraft.isNullOrEmpty()) {
-            // One-time migration so an upgrading user does not lose an active draft.
-            draft = legacyDraft.takeIf { it.isNotEmpty() }
-            if (draft != null) runCatching { draftFile.writeText(draft, Charsets.UTF_8) }
-        }
-
-        if (draft != null) {
-            // Unsaved edits existed on top of the remembered document.
-            if (lastUri != null && lastTitle != null) {
-                documentUri = lastUri
-                title = lastTitle
-            }
-            editor = TextFieldValue(draft)
-            history.reset(snapshot())
-            historyTick++
-            documentSession++
-            isDirty = true
-            return
-        }
-
-        if (lastUri == null || lastTitle == null) return
-
-        // No unsaved work: reopen the last document. Read on IO, apply on Main.
         val generation = ++restoreGeneration
+
+        // Both reads are IO: a large document used to be read from disk on the
+        // main thread inside onCreate, which contradicts the threading contract
+        // above and stalls the first frame.
         scope.launch {
+            val draft = withContext(Dispatchers.IO) {
+                val existing = if (draftFile.exists()) {
+                    runCatching { draftFile.readText(Charsets.UTF_8) }.getOrNull()
+                } else null
+                // An empty draft.txt means "saved cleanly", not "user erased
+                // everything": markClean() deletes the file, so a zero-length
+                // survivor is stale state and must not resurrect as an empty
+                // dirty document.
+                existing?.takeIf { it.isNotEmpty() }
+                    ?: legacyDraft?.takeIf { it.isNotEmpty() }?.also { legacy ->
+                        // One-time migration so an upgrading user does not lose
+                        // an active draft.
+                        runCatching { draftFile.writeText(legacy, Charsets.UTF_8) }
+                    }
+            }
+            if (generation != restoreGeneration) return@launch
+
+            if (draft != null) {
+                // Unsaved edits existed on top of the remembered document.
+                if (lastUri != null && lastTitle != null) {
+                    documentUri = lastUri
+                    title = lastTitle
+                }
+                editor = TextFieldValue(draft)
+                history.reset(snapshot())
+                historyTick++
+                documentSession++
+                isDirty = true
+                return@launch
+            }
+
+            if (lastUri == null || lastTitle == null) return@launch
+
+            // No unsaved work: reopen the last document. Read on IO, apply on Main.
             val text = withContext(Dispatchers.IO) { runCatching { readUri(lastUri) }.getOrNull() }
             if (generation != restoreGeneration) return@launch
             if (text == null) {

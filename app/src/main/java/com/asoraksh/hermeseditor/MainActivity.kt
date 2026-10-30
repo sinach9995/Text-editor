@@ -42,7 +42,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -163,21 +162,29 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // Seed the ViewModel once. On a recreation (rotation, or recreate() on a
-        // language switch) savedInstanceState is non-null and the launch intent
-        // must NOT be replayed, or it would overwrite unsaved edits with the
-        // on-disk copy. Later intents arrive through onNewIntent.
-        if (savedInstanceState == null) {
-            val legacy = prefs.getString("draft", "")
-            if (legacy != null) prefs.edit().remove("draft").apply()
-            vm.attachStore(PrefsSessionStore(this))
+        // The store and the recovery-draft file live as long as the ViewModel,
+        // not as long as one Activity instance. After process death the system
+        // recreates the Activity WITH savedInstanceState and a brand new
+        // ViewModel, so attaching these only on a null savedInstanceState left
+        // that restore with a null store and a null draft file -- the exact
+        // case this feature exists for.
+        val store = PrefsSessionStore(this)
+        vm.attachStore(store)
+        vm.attachDraft(File(filesDir, "draft.txt"))
 
-            // An incoming ACTION_VIEW/SEND must win over the cold-start restore,
-            // so it is handled first: it bumps the restore generation and makes
-            // any in-flight last_uri read discard its result.
-            val incoming = intent?.takeIf { it.data != null }
+        // A replayed launch intent must NOT overwrite unsaved edits on a
+        // recreation (rotation, language switch, process death). Only a truly
+        // fresh activity honours it; later intents arrive through onNewIntent.
+        val fresh = savedInstanceState == null
+        val legacy = if (fresh) prefs.getString("draft", "")?.also { prefs.edit().remove("draft").apply() } else null
+        val incoming = if (fresh) intent?.takeIf { it.data != null } else null
+        if (incoming != null) {
+            // An incoming ACTION_VIEW/SEND wins over the cold-start restore: it
+            // bumps the restore generation, so a late last_uri read is discarded.
             handleIncomingIntent(incoming)
-            if (incoming == null) restoreLastSession(legacy)
+        } else {
+            // Idempotent: a rotation reuses this ViewModel and returns at once.
+            restoreLastSession(legacy, store)
         }
         setContent { HermesEditor() }
     }
@@ -194,8 +201,7 @@ class MainActivity : ComponentActivity() {
      * recovery draft when there are unsaved edits. The read happens on IO and
      * an unreadable uri clears the remembered identity instead of crashing.
      */
-    private fun restoreLastSession(legacyDraft: String?) {
-        val store = PrefsSessionStore(this)
+    private fun restoreLastSession(legacyDraft: String?, store: PrefsSessionStore) {
         val last = store.loadLastDocument()
         vm.restoreSession(
             draftFile = File(filesDir, "draft.txt"),
@@ -242,7 +248,10 @@ class MainActivity : ComponentActivity() {
             } else {
                 vm.setDocumentUri(uri)
                 vm.renameTitle(displayName(uri))
-                vm.markClean()
+                // Text typed while the write was in flight is not in the file.
+                // Clearing the dirty flag and retiring the recovery draft here
+                // would report it saved and drop the only copy of those keys.
+                if (vm.editor.text == draft) vm.markClean()
                 notifyMessage(getString(R.string.saved, displayName(uri)))
             }
         }
@@ -260,7 +269,9 @@ class MainActivity : ComponentActivity() {
             if (ok) {
                 vm.setDocumentUri(uri)
                 vm.renameTitle(displayName(uri))
-                vm.markClean()
+                // Same guard as saveToUri: only retire the draft when the file
+                // holds exactly the text on screen.
+                if (vm.editor.text == draft) vm.markClean()
                 notifyMessage(getString(R.string.saved_copy, displayName(uri)))
             } else {
                 fallbackSaveAsAfterDenied(null)
