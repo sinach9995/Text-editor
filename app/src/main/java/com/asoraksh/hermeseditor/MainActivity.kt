@@ -394,6 +394,12 @@ class MainActivity : ComponentActivity() {
         var cursorVisibilityRequest by remember { mutableStateOf(false) }
         val cursorRequester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
         val imeBottom = WindowInsets.ime.getBottom(density)
+        // Landscape with the keyboard open is the only layout with no room left:
+        // the New/Open/Save bar floats over the text and a 72dp header eats a
+        // third of the screen.  There, keep just Undo/Redo and a one-line
+        // header; everything returns when the keyboard closes.
+        val compactChrome = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+            Configuration.ORIENTATION_LANDSCAPE && imeBottom > 0
         var viewportHeight by remember { mutableStateOf(0) }
         var editorFocused by remember { mutableStateOf(false) }
         fun sourceAnchor(screen: Offset): DocumentAnchor {
@@ -637,12 +643,15 @@ class MainActivity : ComponentActivity() {
                         onTogglePreview = { switchMode() },
                         onDirRequest = { showDirMenu = true },
                         onHelpRequest = { showHelp = true },
-                        onFind = { if (mdPreview) switchMode(); finding = true }
+                        onFind = { if (mdPreview) switchMode(); finding = true },
+                        compact = compactChrome
                     )
                     }
                 },
                 bottomBar = {
-                    Column(Modifier.navigationBarsPadding().imePadding()) {
+                    // Hidden in landscape while typing: New/Open/Save would sit on
+                    // top of the text line the user is editing.
+                    if (!compactChrome) Column(Modifier.navigationBarsPadding().imePadding()) {
                     ActionBar(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -854,14 +863,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit) {
+    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(72.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text("Hermes Text Editor", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(title, maxLines = 1, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState()), color = MaterialTheme.colorScheme.onSurface, fontSize = 19.sp, fontWeight = FontWeight.SemiBold) }
-            Box { IconButton(onClick = { expanded = true }) { Text("⋮", fontSize = 30.sp) }; DropdownMenu(expanded, { expanded = false }) {
+        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = if (compact) 0.dp else 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(if (compact) 44.dp else 72.dp).padding(horizontal = if (compact) 12.dp else 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The icon and the app name are decoration; the document title is not.
+            if (!compact) {
+                Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(Modifier.weight(1f)) { if (!compact) Text("Hermes Text Editor", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(title, maxLines = 1, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState()), color = MaterialTheme.colorScheme.onSurface, fontSize = if (compact) 14.sp else 19.sp, fontWeight = FontWeight.SemiBold) }
+            Box { IconButton(onClick = { expanded = true }, modifier = Modifier.size(if (compact) 36.dp else 40.dp)) { Text("⋮", fontSize = if (compact) 22.sp else 30.sp) }; DropdownMenu(expanded, { expanded = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(if (theme == AppTheme.DARK) R.string.theme_to_light else R.string.theme_to_dark)) },
                     leadingIcon = { Image(painter = painterResource(id = if (theme == AppTheme.DARK) R.drawable.asora_theme_sun_minimal else R.drawable.asora_theme_moon_minimal), contentDescription = null, modifier = Modifier.size(24.dp), colorFilter = ColorFilter.tint(iconTint)) },
