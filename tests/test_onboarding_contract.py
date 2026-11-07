@@ -10,7 +10,7 @@ FA = ROOT / "app/src/main/res/values-fa/strings.xml"
 
 class OnboardingContract(unittest.TestCase):
     def test_replaces_auto_dismissed_hints_with_four_steps(self):
-        code = SOURCE.read_text()
+        code = SOURCE.read_text(encoding='utf-8')
         self.assertNotIn('"zoom_hint_seen"', code)
         self.assertNotIn('"save_hint_seen"', code)
         self.assertIn('onboarding_language_chosen', code)
@@ -21,14 +21,14 @@ class OnboardingContract(unittest.TestCase):
         self.assertIn('onboardingStep >= 3', code)
 
     def test_guide_is_replayable_and_kept_clear_of_bottom_controls(self):
-        code = SOURCE.read_text()
+        code = SOURCE.read_text(encoding='utf-8')
         self.assertIn('onboarding_replay', code)
         self.assertIn('contentAlignment = Alignment.BottomCenter', code)
         self.assertIn('top = 120.dp, end = 24.dp, bottom = 270.dp', code)
         self.assertIn('onDismissRequest = onSkip', code)
 
     def test_both_languages_include_all_guide_strings(self):
-        for resources in (EN.read_text(), FA.read_text()):
+        for resources in (EN.read_text(encoding='utf-8'), FA.read_text(encoding='utf-8')):
             for name in (
                 'onboarding_title', 'onboarding_new_title', 'onboarding_new_body',
                 'onboarding_save_title', 'onboarding_save_body',
@@ -38,9 +38,9 @@ class OnboardingContract(unittest.TestCase):
                 'onboarding_done', 'onboarding_replay',
             ):
                 self.assertIn(f'name="{name}"', resources)
-        self.assertIn('>راهنمای شروع<', FA.read_text())
-        self.assertIn('>بازگرداندن<', FA.read_text())
-        self.assertIn('>تکرار تغییر<', FA.read_text())
+        self.assertIn('>راهنمای شروع<', FA.read_text(encoding='utf-8'))
+        self.assertIn('>بازگرداندن<', FA.read_text(encoding='utf-8'))
+        self.assertIn('>تکرار تغییر<', FA.read_text(encoding='utf-8'))
 
 
 if __name__ == "__main__":

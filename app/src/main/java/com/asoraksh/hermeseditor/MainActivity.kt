@@ -274,7 +274,9 @@ class MainActivity : ComponentActivity() {
                 if (vm.editor.text == draft) vm.markClean()
                 notifyMessage(getString(R.string.saved_copy, displayName(uri)))
             } else {
-                fallbackSaveAsAfterDenied(null)
+                // The picked target failed for an unknown reason; "read-only" plus
+                // another Save As prompt would misdiagnose it and loop.
+                notifyMessage(getString(R.string.save_failed))
             }
         }
     }

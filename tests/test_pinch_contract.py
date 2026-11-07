@@ -6,14 +6,14 @@ SOURCE = ROOT / 'app/src/main/java/com/asoraksh/hermeseditor'
 
 class PinchWiring(unittest.TestCase):
     def test_document_only_zoom_is_connected_and_persisted(self):
-        activity = (SOURCE / 'MainActivity.kt').read_text()
+        activity = (SOURCE / 'MainActivity.kt').read_text(encoding='utf-8')
         self.assertEqual(activity.count('.documentPinchZoom('), 2)
         self.assertIn('putFloat("document_font_size", fontSize)', activity)
         self.assertIn('fontSize = fontSize,', activity)
         self.assertIn('coerceIn(13f, 30f)', activity)
 
     def test_single_finger_is_not_consumed_before_multitouch(self):
-        source = (SOURCE / 'DocumentPinchZoom.kt').read_text()
+        source = (SOURCE / 'DocumentPinchZoom.kt').read_text(encoding='utf-8')
         self.assertIn('PointerEventPass.Initial', source)
         self.assertIn('pressed.size >= 2', source)
         self.assertIn('it.previousPressed', source)

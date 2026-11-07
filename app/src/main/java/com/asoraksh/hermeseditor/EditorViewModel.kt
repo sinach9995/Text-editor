@@ -129,6 +129,7 @@ class EditorViewModel : ViewModel() {
         if (restored) return
         restored = true
         val generation = ++restoreGeneration
+        val epoch = draftEpoch
 
         // Both reads are IO: a large document used to be read from disk on the
         // main thread inside onCreate, which contradicts the threading contract
@@ -138,15 +139,14 @@ class EditorViewModel : ViewModel() {
                 val existing = if (draftFile.exists()) {
                     runCatching { draftFile.readText(Charsets.UTF_8) }.getOrNull()
                 } else null
-                // An empty draft.txt means "saved cleanly", not "user erased
-                // everything": markClean() deletes the file, so a zero-length
-                // survivor is stale state and must not resurrect as an empty
-                // dirty document.
-                existing?.takeIf { it.isNotEmpty() }
+                // A zero-length draft.txt is a real draft (the user erased
+                // everything). It is safe to trust because every save, new and
+                // open retires the file via retireDraft(), and writes are atomic.
+                existing
                     ?: legacyDraft?.takeIf { it.isNotEmpty() }?.also { legacy ->
                         // One-time migration so an upgrading user does not lose
                         // an active draft.
-                        runCatching { draftFile.writeText(legacy, Charsets.UTF_8) }
+                        writeDraft(legacy, epoch)
                     }
             }
             if (generation != restoreGeneration) return@launch
@@ -203,8 +203,13 @@ class EditorViewModel : ViewModel() {
         // land afterwards and overwrite the document the user just opened.
         restoreGeneration++
         restored = true
+        // The previous document's recovery draft must not outlive it, and the
+        // remembered identity must follow the document, or a later draft would
+        // be restored onto (and saved over) the wrong file.
+        retireDraft()
         documentUri = uri
         title = newTitle
+        rememberDocument()
         editor = TextFieldValue(text)
         history.reset(snapshot())
         historyTick++
@@ -215,26 +220,31 @@ class EditorViewModel : ViewModel() {
 
     fun renameTitle(newTitle: String) {
         if (title != newTitle) title = newTitle
+        rememberDocument()
     }
 
     fun setDocumentUri(uri: Uri?) {
         documentUri = uri
+        rememberDocument()
+    }
+
+    /** Persists which file is open; a draft is only ever paired with this identity. */
+    private fun rememberDocument() {
+        store?.let { s -> documentUri?.let { s.saveLastDocument(it, title) } }
     }
 
     fun markClean() {
         isDirty = false
-        // Remember the document identity so the next cold start can reopen it.
-        store?.let { s -> documentUri?.let { s.saveLastDocument(it, title) } }
+        rememberDocument()
         // The document is now on disk, so the recovery copy is redundant. Leaving
         // it behind would make the next cold start reopen saved text as "unsaved".
-        autosaveJob?.cancel()
-        val file = draftFile
-        scope.launch { withContext(Dispatchers.IO) { file?.let { runCatching { it.delete() } } } }
+        retireDraft()
     }
 
     fun newDocument(markdown: Boolean) {
         restoreGeneration++
         restored = true
+        retireDraft()
         forgetLastDocument()
         documentUri = null
         title = if (markdown) UNTOOLED_MD else UNTOOLED_TXT
@@ -277,25 +287,56 @@ class EditorViewModel : ViewModel() {
     // --- Crash recovery -----------------------------------------------------
     // The draft file is recovery-only. Every save reads editor.text directly.
 
+    // Every draft write and delete goes through draftLock, and retireDraft()
+    // bumps draftEpoch, so a write queued before a save/new/open can never land
+    // after that delete and resurrect old text.
+    private val draftLock = Any()
+    private var draftEpoch = 0
+
+    private fun writeDraft(text: String, epoch: Int) {
+        synchronized(draftLock) {
+            val file = draftFile ?: return
+            if (epoch != draftEpoch) return
+            runCatching {
+                // Temp file + rename: a process kill mid-write must not truncate the draft.
+                val tmp = File(file.parentFile, file.name + ".tmp")
+                tmp.writeText(text, Charsets.UTF_8)
+                if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+            }
+        }
+    }
+
+    // shortcut: delete runs on the caller (main) thread, a tiny file op that can
+    // wait briefly on an in-flight write; move it off-thread if drafts get huge.
+    private fun retireDraft() {
+        autosaveJob?.cancel()
+        synchronized(draftLock) {
+            draftEpoch++
+            draftFile?.let { runCatching { it.delete() } }
+        }
+    }
+
     private fun scheduleAutosave(text: String) {
         autosaveJob?.cancel()
         if (!isDirty) return
+        val epoch = draftEpoch
         autosaveJob = scope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
-            withContext(Dispatchers.IO) { draftFile?.let { runCatching { it.writeText(text, Charsets.UTF_8) } } }
+            withContext(Dispatchers.IO) { writeDraft(text, epoch) }
         }
     }
 
     /**
-     * Immediate write for onPause/onStop, so backgrounding never loses keystrokes.
-     * No-op when clean: markClean() retires the draft file, and rewriting it here
-     * would make the next cold start report an already-saved document as dirty.
+     * Immediate, synchronous write for onPause and Back, so backgrounding or
+     * exiting never loses keystrokes: a coroutine launched here could be
+     * cancelled by onCleared() before it ran. No-op when clean: retireDraft()
+     * removed the file, and rewriting it would make the next cold start report
+     * an already-saved document as dirty.
      */
     fun flushAutosave() {
         autosaveJob?.cancel()
         if (!isDirty) return
-        val text = editor.text
-        scope.launch { withContext(Dispatchers.IO) { draftFile?.let { runCatching { it.writeText(text, Charsets.UTF_8) } } } }
+        writeDraft(editor.text, draftEpoch)
     }
 
     override fun onCleared() {

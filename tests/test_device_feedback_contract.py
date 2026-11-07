@@ -4,11 +4,11 @@ import unittest
 R = Path(__file__).resolve().parents[1] / 'app/src/main/java/com/asoraksh/hermeseditor'
 class FeedbackContract(unittest.TestCase):
     def test_pinch_has_centroid(self):
-        self.assertIn('calculateCentroid', (R/'DocumentPinchZoom.kt').read_text())
+        self.assertIn('calculateCentroid', (R/'DocumentPinchZoom.kt').read_text(encoding='utf-8'))
     def test_preview_scroll_owned_by_editor(self):
-        self.assertIn('scrollState: ScrollState', (R/'MarkdownPreview.kt').read_text())
+        self.assertIn('scrollState: ScrollState', (R/'MarkdownPreview.kt').read_text(encoding='utf-8'))
     def test_help_and_new_markdown(self):
-        text=(R/'MainActivity.kt').read_text()
+        text=(R/'MainActivity.kt').read_text(encoding='utf-8')
         self.assertIn('HelpPage', text)
         self.assertIn('onNewMarkdown', text)
         self.assertNotIn('if (showHelp) HelpDialog', text)

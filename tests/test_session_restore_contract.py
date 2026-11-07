@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "app/src/main/java/com/asoraksh/hermeseditor"
-MAIN = (SRC / "MainActivity.kt").read_text()
-VM = (SRC / "EditorViewModel.kt").read_text()
+MAIN = (SRC / "MainActivity.kt").read_text(encoding='utf-8')
+VM = (SRC / "EditorViewModel.kt").read_text(encoding='utf-8')
 
 failures = []
 
@@ -62,7 +62,26 @@ check("draft restore keeps the remembered uri/title", "documentUri = lastUri" in
 check("no-draft restore re-reads last_uri", "readUri(lastUri)" in restore)
 check("no-draft restore is clean, not dirty", re.search(r"documentUri = lastUri.*?isDirty = false", restore, re.S) is not None)
 check("unreadable last_uri falls back to untitled.txt", "title = UNTOOLED_TXT" in restore and "forgetLastDocument()" in restore)
-check("empty draft.txt is treated as clean", "takeIf { it.isNotEmpty() }" in restore)
+check("an empty draft.txt is a real (erased-everything) draft", "takeIf { it.isNotEmpty() }" not in restore.split("legacyDraft")[0])
+
+# --- Recovery draft lifecycle: nothing may outlive its document -----------
+retire = body(VM, "private fun retireDraft(")
+write = body(VM, "private fun writeDraft(")
+flush = body(VM, "fun flushAutosave(")
+set_doc = body(VM, "fun setDocument(")
+new_doc = body(VM, "fun newDocument(")
+mark = body(VM, "fun markClean(")
+check("new document retires the draft", "retireDraft()" in new_doc)
+check("opening a document retires the draft", "retireDraft()" in set_doc)
+check("saving retires the draft", "retireDraft()" in mark)
+check("opening a document remembers its identity", "rememberDocument()" in set_doc)
+check("Save As identity is remembered before markClean can be skipped", "rememberDocument()" in body(VM, "fun setDocumentUri(") and "rememberDocument()" in body(VM, "fun renameTitle("))
+check("retire bumps the epoch under the draft lock", "draftEpoch++" in retire and "synchronized(draftLock)" in retire)
+check("stale writes are dropped by epoch", "epoch != draftEpoch" in write and "synchronized(draftLock)" in write)
+check("draft write is atomic (temp + rename)", ".tmp" in write and "renameTo(file)" in write)
+check("exit flush is synchronous, not a cancellable launch", "scope.launch" not in flush and "writeDraft(" in flush)
+check("legacy migration goes through the guarded writer", "writeDraft(legacy" in restore)
+check("failed Save As does not re-open the Save As prompt", "fallbackSaveAsAfterDenied" not in save_as and "R.string.save_failed" in save_as)
 
 # --- Restore survives process death --------------------------------------
 # After the system kills the process it recreates the Activity WITH
@@ -97,10 +116,10 @@ check("saveToUri clears dirty state only under the guard", "if (vm.editor.text =
 check("saveAsToUri compares written text with live text", "vm.editor.text == draft" in save_as)
 
 # --- Persistence shape ----------------------------------------------------
-check("markClean remembers the document", re.search(r"fun markClean\(\).*?saveLastDocument", VM, re.S) is not None)
+check("markClean remembers the document", "rememberDocument()" in mark and "saveLastDocument" in body(VM, "private fun rememberDocument("))
 check("newDocument forgets the document", re.search(r"fun newDocument\(.*?forgetLastDocument\(\)", VM, re.S) is not None)
 check("SessionStore exists", (SRC / "SessionStore.kt").exists())
-store = (SRC / "SessionStore.kt").read_text() if (SRC / "SessionStore.kt").exists() else ""
+store = (SRC / "SessionStore.kt").read_text(encoding='utf-8') if (SRC / "SessionStore.kt").exists() else ""
 check("SessionStore keys are last_uri/last_title", '"last_uri"' in store and '"last_title"' in store)
 check("SessionStore stores no document text", 'getString("draft"' not in store and "editor.text" not in store)
 check("ViewModel stays Context-free", "android.content.Context" not in VM)

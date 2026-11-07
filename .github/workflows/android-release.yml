@@ -22,6 +22,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - name: Run source-contract tests
+        run: for f in tests/test_*.py; do python3 "$f" || exit 1; done
       - name: Build debug APK
         run: gradle :app:assembleDebug
       - name: Upload APK
