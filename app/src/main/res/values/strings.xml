@@ -17,7 +17,7 @@
     <string name="cancel">Cancel</string>
     <string name="cont">Continue</string>
     <string name="discard_title">Discard current text?</string>
-    <string name="discard_open">Your draft is safely cached, but this editor will be replaced by the selected action.</string>
+    <string name="discard_open">Your unsaved changes will be lost if you continue.</string>
     <string name="discard_clear">This will clear the editor. Your last saved file will not be changed.</string>
     <string name="err_open">Could not open file</string>
     <string name="err_save">Could not save file</string>

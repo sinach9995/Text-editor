@@ -12,14 +12,14 @@ class MarkdownContractTests(unittest.TestCase):
     def test_source_uses_original_annotations_and_identity_mapping(self):
         path = SOURCE / 'MarkdownSourceStyling.kt'
         self.assertTrue(path.exists(), 'source transformation is missing')
-        code = path.read_text()
+        code = path.read_text(encoding='utf-8')
         self.assertIn('AnnotatedString.Builder(text)', code)
         self.assertIn('OffsetMapping.Identity', code)
         self.assertIn('IncludeSourceSpans.BLOCKS_AND_INLINES', code)
         self.assertIn('activeMatch: TextRange? = null', code)
 
     def test_preview_scales_document_without_scaling_app_chrome(self):
-        code = (SOURCE / 'MarkdownPreview.kt').read_text()
+        code = (SOURCE / 'MarkdownPreview.kt').read_text(encoding='utf-8')
         self.assertIn('fontSize: Float = 17f', code)
         self.assertIn('fontSize / 17f', code)
         self.assertIn('stringResource(R.string.preview_empty)', code)
@@ -31,7 +31,7 @@ class MarkdownContractTests(unittest.TestCase):
         self.assertIn('.graphicsLayer {', code)
         # The temporary gesture layer belongs to the Markdown document; the
         # application top and bottom bars stay outside MarkdownPreview.
-        activity = (SOURCE / 'MainActivity.kt').read_text()
+        activity = (SOURCE / 'MainActivity.kt').read_text(encoding='utf-8')
         chrome = activity.split('topBar = {', 1)[1].split('contentWindowInsets', 1)[0]
         self.assertNotIn('.graphicsLayer {', chrome)
 
