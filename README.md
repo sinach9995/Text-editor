@@ -77,8 +77,8 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 ## Current version
 
-- **Version:** 1.4
-- **Version code:** 5
+- **Version:** 1.5
+- **Version code:** 6
 - **Package:** `com.asoraksh.hermeseditor`
 
 ## Independent project notice
