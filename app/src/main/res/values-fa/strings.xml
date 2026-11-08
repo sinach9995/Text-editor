@@ -17,7 +17,7 @@
     <string name="cancel">لغو</string>
     <string name="cont">ادامه</string>
     <string name="discard_title">متن فعلی دور انداخته شود؟</string>
-    <string name="discard_open">پیش‌نویس شما به‌صورت امن ذخیره شده، اما ویرایشگر با اقدام انتخاب‌شده جایگزین می‌شود.</string>
+    <string name="discard_open">در صورت ادامه، تغییرات ذخیره‌نشده شما از بین می‌رود.</string>
     <string name="discard_clear">این کار ویرایشگر را پاک می‌کند. آخرین فایل ذخیره‌شده شما تغییر نمی‌کند.</string>
     <string name="err_open">فایل باز نشد</string>
     <string name="err_save">فایل ذخیره نشد</string>

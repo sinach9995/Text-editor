@@ -213,11 +213,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // An incoming file waiting for the user to agree to replace unsaved text.
+    private var pendingIncoming by mutableStateOf<Uri?>(null)
+
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         // File-manager shares do not always grant persistent access; reading
         // must still work, so the permission calls are individually guarded.
         takePersistablePermissions(uri)
+        if (vm.isDirty) pendingIncoming = uri else openIncoming(uri)
+    }
+
+    private fun openIncoming(uri: Uri) {
         lifecycleScope.launch {
             val text = withContext(Dispatchers.IO) {
                 runCatching {
@@ -608,7 +615,11 @@ class MainActivity : ComponentActivity() {
         // exactly once per session change -- including a re-open of the file
         // already open, which a (title, uri) key would have missed.
         val documentSession by vm::documentSession
-        LaunchedEffect(documentSession) { onNewDocumentSession(vm.title) }
+        // Skip when only the Activity was recreated (rotation, language): that
+        // must keep Find, Preview mode and scroll position.
+        LaunchedEffect(documentSession) {
+            if (vm.surfaceSession != documentSession) { vm.surfaceSession = documentSession; onNewDocumentSession(vm.title) }
+        }
         // Ask the editor surface to open Save As after a denied write.
         LaunchedEffect(Unit) { for (unit in saveAsFallback) { showFormatChoice = true } }
         // Suggest a writing direction only when the opened document clearly
@@ -616,6 +627,8 @@ class MainActivity : ComponentActivity() {
         // document session (not filename), so two files sharing a name each
         // get their own single suggestion. Manual choice is kept.
         LaunchedEffect(dirSession) {
+            if (vm.directionCheckedSession == documentSession) return@LaunchedEffect
+            vm.directionCheckedSession = documentSession
             if (text.isNotBlank()) {
                 val detected = detectDirection(text)
                 dirSuggest = if (detected != null && detected != docRtl) detected else null
@@ -788,6 +801,7 @@ class MainActivity : ComponentActivity() {
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
             if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; vm.newDocument(false) }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
+            pendingIncoming?.let { uri -> AlertDialog(onDismissRequest = { pendingIncoming = null }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { pendingIncoming = null; openIncoming(uri) }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { pendingIncoming = null }) { Text(stringResource(R.string.cancel)) } }) }
             if (dirSuggest != null) {
                 val toRtl = dirSuggest == true
                 AlertDialog(

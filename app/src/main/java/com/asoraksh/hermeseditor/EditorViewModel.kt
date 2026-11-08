@@ -78,6 +78,10 @@ class EditorViewModel : ViewModel() {
     var forceSourceMode: Boolean by mutableStateOf(false)
         private set
 
+    /** Last documentSession the UI reset itself for; a recreated Activity must not reset again. */
+    var surfaceSession = -1
+    var directionCheckedSession = -1
+
     val history = EditorHistory()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -257,19 +261,25 @@ class EditorViewModel : ViewModel() {
     }
 
     fun onTextChanged(newValue: TextFieldValue, allowCoalescing: Boolean) {
+        val changed = newValue.text != editor.text
         history.record(snapshot(), of(newValue), android.os.SystemClock.uptimeMillis(), allowCoalescing = allowCoalescing)
         historyTick++
         editor = newValue
-        if (!isDirty) isDirty = true
-        scheduleAutosave(newValue.text)
+        // A cursor move or selection is not an edit.
+        if (changed) afterEdit(newValue.text)
+    }
+
+    /** A blank, never-saved document has nothing to lose, so it is not dirty and keeps no draft. */
+    private fun afterEdit(text: String) {
+        isDirty = documentUri != null || text.isNotEmpty()
+        if (isDirty) scheduleAutosave(text) else retireDraft()
     }
 
     fun undo(): Boolean {
         val target = history.undo(snapshot()) ?: return false
         editor = TextFieldValue(target.text, TextRange(target.start, target.end))
         historyTick++
-        isDirty = true
-        scheduleAutosave(target.text)
+        afterEdit(target.text)
         return true
     }
 
@@ -277,8 +287,7 @@ class EditorViewModel : ViewModel() {
         val target = history.redo(snapshot()) ?: return false
         editor = TextFieldValue(target.text, TextRange(target.start, target.end))
         historyTick++
-        isDirty = true
-        scheduleAutosave(target.text)
+        afterEdit(target.text)
         return true
     }
 

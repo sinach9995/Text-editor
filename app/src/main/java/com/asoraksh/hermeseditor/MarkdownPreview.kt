@@ -130,9 +130,22 @@ fun markdownToPlainText(src: String): String {
             when (cur) {
                 is Paragraph, is Heading -> { inline(cur); sb.append("\n\n") }
                 is ListItem -> {
+                    sb.append("  ".repeat(generateSequence(cur.parent) { it.parent }.count { it is ListItem }))
                     sb.append(itemPrefix(cur, ++ordinal))
-                    inline(cur)
-                    sb.append('\n')
+                    var part: Node? = cur.firstChild
+                    while (part != null) {
+                        // A nested list starts on its own line instead of running into the parent text.
+                        if (part is BulletList || part is OrderedList) {
+                            if (!sb.endsWith("\n")) sb.append('\n')
+                            blocks(part)
+                        } else inline(part)
+                        part = part.next
+                    }
+                    if (!sb.endsWith("\n")) sb.append('\n')
+                }
+                is BulletList, is OrderedList -> {
+                    blocks(cur)
+                    if (cur.parent !is ListItem) sb.append('\n')
                 }
                 is FencedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is IndentedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")

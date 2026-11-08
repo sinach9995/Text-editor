@@ -149,6 +149,14 @@ for m in re.finditer(r"withContext\(Dispatchers\.IO\)", VM):
         unsafe.append(VM[:m.start()].count("\n") + 1)
 check(f"no state mutation inside any Dispatchers.IO block (offenders: {unsafe})", not unsafe)
 
+# --- Consumer-QA fixes ------------------------------------------------------
+MD = (SRC / "MarkdownPreview.kt").read_text(encoding='utf-8')
+check("blank untitled document is not dirty", "isDirty = documentUri != null || text.isNotEmpty()" in VM)
+check("selection-only change is not an edit", "if (changed) afterEdit(newValue.text)" in VM)
+check("undo/redo share afterEdit", VM.count("afterEdit(target.text)") == 2)
+check("surface reset skipped on recreation", "vm.surfaceSession != documentSession" in MAIN)
+check("incoming file asks before replacing dirty text", "if (vm.isDirty) pendingIncoming = uri else openIncoming(uri)" in MAIN)
+check("export walks nested lists", "blocks(part)" in MD)
 if failures:
     print(f"\n{len(failures)} contract(s) failed")
     sys.exit(1)
