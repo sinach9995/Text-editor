@@ -5,45 +5,58 @@ import android.content.SharedPreferences
 import android.net.Uri
 
 /**
- * Durable identity of the document the user last had open.
+ * Durable identity of the open tabs.
  *
- * The ViewModel keeps the live text; this keeps only *which file* was open, so a
- * cold start after a clean save can reopen the workspace instead of returning to
- * a blank editor. It deliberately holds no document text -- draft.txt covers
- * unsaved edits, and text in SharedPreferences was the thing that made this app
- * serialise the whole document on every keystroke.
+ * As of v1.6 this stores the whole tab manifest instead of one last_uri.
+ * Document text still never lives here: draft_<tabId>.txt holds unsaved edits
+ * and the manifest records only which files were open, in what order, which
+ * one was active, and how many characters each held (for the memory budget).
+ *
+ * Writes go through [saveManifest], called on every structural change and from
+ * onPause, so a process kill loses at most the last few hundred milliseconds of
+ * keystrokes -- and those are already in the draft file.
  */
 interface SessionStore {
-    fun saveLastDocument(uri: Uri, title: String)
-    fun loadLastDocument(): Pair<Uri, String>?
-    fun clearLastDocument()
+    fun loadManifest(): TabManifest?
+    fun saveManifest(manifest: TabManifest)
+    fun clearManifest()
+
+    /** Pre-v1.6 single-document identity, read once for the migration. */
+    fun loadLegacyDocument(): Pair<Uri, String>?
+    fun clearLegacyDocument()
 }
 
-/** SharedPreferences-backed [SessionStore]. Small values only, written on save. */
+/** SharedPreferences-backed [SessionStore]. One JSON string, written atomically by the platform. */
 class PrefsSessionStore(context: Context) : SessionStore {
 
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences("hermes_editor", Context.MODE_PRIVATE)
 
-    override fun saveLastDocument(uri: Uri, title: String) {
-        prefs.edit()
-            .putString(KEY_URI, uri.toString())
-            .putString(KEY_TITLE, title)
-            .apply()
+    override fun loadManifest(): TabManifest? = TabManifestCodec.decode(prefs.getString(KEY_MANIFEST, null))
+
+    override fun saveManifest(manifest: TabManifest) {
+        // commit(), not apply(): onPause needs the bytes on disk before the
+        // process can be killed. The manifest is a few hundred bytes.
+        prefs.edit().putString(KEY_MANIFEST, TabManifestCodec.encode(manifest)).commit()
     }
 
-    override fun loadLastDocument(): Pair<Uri, String>? {
-        val uri = prefs.getString(KEY_URI, null)?.takeIf { it.isNotBlank() } ?: return null
-        val title = prefs.getString(KEY_TITLE, null)?.takeIf { it.isNotBlank() } ?: return null
+    override fun clearManifest() {
+        prefs.edit().remove(KEY_MANIFEST).commit()
+    }
+
+    override fun loadLegacyDocument(): Pair<Uri, String>? {
+        val uri = prefs.getString(KEY_LEGACY_URI, null)?.takeIf { it.isNotBlank() } ?: return null
+        val title = prefs.getString(KEY_LEGACY_TITLE, null)?.takeIf { it.isNotBlank() } ?: return null
         return runCatching { Uri.parse(uri) to title }.getOrNull()
     }
 
-    override fun clearLastDocument() {
-        prefs.edit().remove(KEY_URI).remove(KEY_TITLE).apply()
+    override fun clearLegacyDocument() {
+        prefs.edit().remove(KEY_LEGACY_URI).remove(KEY_LEGACY_TITLE).commit()
     }
 
     private companion object {
-        const val KEY_URI = "last_uri"
-        const val KEY_TITLE = "last_title"
+        const val KEY_MANIFEST = "tabs_manifest"
+        const val KEY_LEGACY_URI = "last_uri"
+        const val KEY_LEGACY_TITLE = "last_title"
     }
 }
