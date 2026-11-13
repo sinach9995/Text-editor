@@ -78,7 +78,7 @@ check("preview mode lives on the tab, not in rememberSaveable",
       "rememberSaveable { mutableStateOf(false) }\n        var mdPreview" not in MAIN)
 check("direction lives on the tab", "val docRtl by vm::docRtl" in MAIN)
 check("preview toggle goes through the ViewModel", "vm.togglePreview()" in MAIN)
-check("direction changes go through the ViewModel", "vm.setDocRtl(" in MAIN)
+check("direction changes go through the ViewModel", "vm.applyDirection(" in MAIN)
 check("scroll is stored per tab", "scrollYFor(" in VM and "fun setScrollY(" in VM)
 check("a switch restores that tab's scroll", "pendingScrollY = vm.scrollYFor(vm.activeTabId)" in MAIN)
 check("scroll is saved before switching", "saveScrollPosition()" in body(MAIN, "fun selectTab("))

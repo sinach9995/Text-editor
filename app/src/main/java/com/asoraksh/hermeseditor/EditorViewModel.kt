@@ -290,7 +290,7 @@ class EditorViewModel : ViewModel() {
 
     fun togglePreview() = setPreview(!activeTab.mdPreview)
 
-    fun setDocRtl(value: Boolean) {
+    fun applyDirection(value: Boolean) {
         activeTab.docRtl = value
         persistManifest()
     }

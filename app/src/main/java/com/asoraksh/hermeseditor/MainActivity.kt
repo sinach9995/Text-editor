@@ -910,7 +910,7 @@ class MainActivity : ComponentActivity() {
                     onDismissRequest = { dirSuggest = null },
                     title = { Text(stringResource(if (toRtl) R.string.dir_sug_title_fa else R.string.dir_sug_title_en)) },
                     text = { Text(stringResource(if (toRtl) R.string.dir_sug_text_fa else R.string.dir_sug_text_en)) },
-                    confirmButton = { TextButton(onClick = { vm.setDocRtl(toRtl); dirSuggest = null }) { Text(stringResource(if (toRtl) R.string.dir_sug_go_rtl else R.string.dir_sug_go_ltr)) } },
+                    confirmButton = { TextButton(onClick = { vm.applyDirection(toRtl); dirSuggest = null }) { Text(stringResource(if (toRtl) R.string.dir_sug_go_rtl else R.string.dir_sug_go_ltr)) } },
                     dismissButton = { TextButton(onClick = { dirSuggest = null }) { Text(stringResource(if (toRtl) R.string.dir_sug_keep_ltr else R.string.dir_sug_keep_rtl)) } }
                 )
             }
@@ -919,8 +919,8 @@ class MainActivity : ComponentActivity() {
                 title = { Text(stringResource(R.string.dir_menu)) },
                 text = {
                     Column {
-                        dirOption(stringResource(R.string.dir_ltr), !docRtl) { vm.setDocRtl(false); showDirMenu = false }
-                        dirOption(stringResource(R.string.dir_rtl), docRtl) { vm.setDocRtl(true); showDirMenu = false }
+                        dirOption(stringResource(R.string.dir_ltr), !docRtl) { vm.applyDirection(false); showDirMenu = false }
+                        dirOption(stringResource(R.string.dir_rtl), docRtl) { vm.applyDirection(true); showDirMenu = false }
                     }
                 },
                 confirmButton = { },
