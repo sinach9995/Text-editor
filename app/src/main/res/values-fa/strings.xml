@@ -110,4 +110,6 @@
     <string name="onboarding_next">بعدی</string>
     <string name="onboarding_done">پایان</string>
     <string name="onboarding_replay">نمایش دوباره راهنمای شروع</string>
+    <string name="font_size">اندازهٔ متن</string>
+    <string name="tab_limit_reached">اول یک زبانه را ببندید؛ حداکثر ۱۰ سند می‌تواند باز بماند</string>
 </resources>

@@ -110,4 +110,6 @@
     <string name="onboarding_next">Next</string>
     <string name="onboarding_done">Done</string>
     <string name="onboarding_replay">Show introductory tips again</string>
+    <string name="font_size">Font size</string>
+    <string name="tab_limit_reached">Close a tab first: up to 10 documents can stay open</string>
 </resources>
