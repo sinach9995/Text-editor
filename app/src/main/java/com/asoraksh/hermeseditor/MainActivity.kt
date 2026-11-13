@@ -20,6 +20,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -112,25 +113,53 @@ class MainActivity : ComponentActivity() {
         catch (_: SecurityException) { }
     }
 
+    /** Grants are a bounded resource; a closed tab gives its own back. */
+    private fun releasePermission(uri: Uri) {
+        runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+    }
+
     private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            takePersistablePermissions(it)
+        uri?.let { target ->
+            takePersistablePermissions(target)
+            // An already-open file is jumped to, never opened twice: two tabs on
+            // one file would save over each other with stale text.
+            val key = documentKey(target)
+            val existing = vm.tabs.firstOrNull { tab ->
+                tab.uri?.let { it == target || documentKey(it) == key } == true
+            }
+            if (existing != null) {
+                vm.switchTab(existing.id)
+                return@let
+            }
             lifecycleScope.launch {
-                val text = withContext(Dispatchers.IO) {
-                    runCatching {
-                        contentResolver.openInputStream(it)?.bufferedReader(Charsets.UTF_8)?.use { r -> r.readText() }
-                    }.getOrNull()
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { contentResolver.openInputStream(target)?.let { BoundedReader.readText(it) } }
                 }
-                if (text == null) {
+                val text = result.getOrNull()
+                when {
+                    result.exceptionOrNull() is BoundedReader.TooLargeException ->
+                        notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
                     // Leave the current buffer untouched; clearing it here would
                     // destroy whatever the user was working on.
-                    notifyMessage(msg("Could not open file", "فایل باز نشد"))
-                } else {
-                    vm.setDocument(it, displayName(it), text)
+                    text == null -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                    else -> vm.setDocument(target, displayName(target), text)
                 }
             }
         }
     }
+
+    /**
+     * Stable identity of a document inside its provider. getDocumentId() throws
+     * for URIs that are not DocumentsProvider-backed, so the isDocumentUri check
+     * must come first and both calls stay inside runCatching; the URI string is
+     * the fallback, and the caller also compares whole URIs.
+     */
+    private fun documentKey(uri: Uri): String = runCatching {
+        if (android.provider.DocumentsContract.isDocumentUri(this, uri)) {
+            android.provider.DocumentsContract.getDocumentId(uri)
+        } else null
+    }.getOrNull() ?: uri.toString()
     private val createDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         uri?.let { saveToUri(it) }
     }
@@ -194,7 +223,10 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleIncomingIntent(intent)
     }
-    override fun onPause() { super.onPause(); vm.flushAutosave() }
+    override fun onPause() { super.onPause(); saveScrollPosition(); vm.flushAutosave() }
+
+    /** Set from the composition, which is the only place that knows the live scroll offsets. */
+    private var saveScrollPosition: () -> Unit = {}
 
     /**
      * Cold start with no incoming intent: reopen the remembered document, or the
@@ -202,14 +234,16 @@ class MainActivity : ComponentActivity() {
      * an unreadable uri clears the remembered identity instead of crashing.
      */
     private fun restoreLastSession(legacyDraft: String?, store: PrefsSessionStore) {
-        val last = store.loadLastDocument()
+        val legacy = store.loadLegacyDocument()
         vm.restoreSession(
             draftFile = File(filesDir, "draft.txt"),
             legacyDraft = legacyDraft,
-            lastUri = last?.first,
-            lastTitle = last?.second,
+            lastUri = legacy?.first,
+            lastTitle = legacy?.second,
         ) { uri ->
-            contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            // Bounded, like every other read path: a 40 MB remembered file must
+            // not kill the process before the first frame.
+            contentResolver.openInputStream(uri)?.let { BoundedReader.readText(it) }
         }
     }
 
@@ -225,14 +259,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openIncoming(uri: Uri) {
+        // Same file already open (share of a document that is in a tab): jump.
+        val key = documentKey(uri)
+        val existing = vm.tabs.firstOrNull { tab -> tab.uri?.let { it == uri || documentKey(it) == key } == true }
+        if (existing != null) {
+            vm.switchTab(existing.id)
+            return
+        }
         lifecycleScope.launch {
-            val text = withContext(Dispatchers.IO) {
-                runCatching {
-                    contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                }.getOrNull()
+            val result = withContext(Dispatchers.IO) {
+                runCatching { contentResolver.openInputStream(uri)?.let { BoundedReader.readText(it) } }
             }
-            // On failure leave the current document alone rather than blanking it.
-            if (text != null) vm.setDocument(uri, displayName(uri), text)
+            val text = result.getOrNull()
+            when {
+                result.exceptionOrNull() is BoundedReader.TooLargeException ->
+                    notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
+                // On failure leave the current document alone rather than blanking it.
+                text != null -> vm.setDocument(uri, displayName(uri), text)
+                else -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
+            }
         }
     }
     private fun saveToUri(uri: Uri) {
@@ -453,15 +498,15 @@ class MainActivity : ComponentActivity() {
         var showDirMenu by remember { mutableStateOf(false) }
         var dirSuggest by remember { mutableStateOf<Boolean?>(null) }
         var dirSession by remember { mutableStateOf(0) }
-        var docRtl by rememberSaveable { mutableStateOf(false) }
-        var mdPreview by rememberSaveable { mutableStateOf(false) }
+        val docRtl by vm::docRtl
+        val mdPreview by vm::mdPreview
         fun captureAnchor(screen: Offset): DocumentAnchor = if (mdPreview)
             previewAnchors.capture(previewScroll.value + screen.y - previewTop, screen.y)
         else sourceAnchor(screen)
         fun switchMode() {
             pendingAnchor = captureAnchor(Offset(0f, textTop))
             previewAnchors.clear()
-            mdPreview = !mdPreview
+            vm.togglePreview()
         }
         val startPinch: (Offset) -> Unit = { centroid ->
             pendingAnchor = null
@@ -561,21 +606,52 @@ class MainActivity : ComponentActivity() {
         }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
         val colors = if (selectedTheme == AppTheme.DARK) darkColorScheme(background = Color(0xFF17191F), surface = Color(0xFF20232B), surfaceVariant = Color(0xFF2A2E38), primary = Color(0xFF5E9FE8), onBackground = Color(0xFFF5F7FA), onSurface = Color(0xFFF5F7FA)) else lightColorScheme(background = Color(0xFFFAFAFC), surface = Color.White, surfaceVariant = Color(0xFFECEEF3), primary = Color(0xFF236DD1), onBackground = Color(0xFF1B1D22), onSurface = Color(0xFF1B1D22))
-        // Reset the per-session editor surface after the ViewModel swaps in a
-        // different document (open, or a new file).
+        // Reset the per-session editor surface after the ViewModel switches to a
+        // different tab, opens a file, or creates one.
+        var pendingScrollY by remember { mutableStateOf<Int?>(null) }
+        // onPause runs outside the composition, so the live offsets are handed
+        // to the Activity through this hook; it is a plain write, no state.
+        SideEffect {
+            saveScrollPosition = {
+                vm.setScrollY(if (mdPreview) previewScroll.value else editorScroll.value)
+            }
+        }
         fun onNewDocumentSession(newTitle: String) {
             finding = false; query = ""; matchIndex = 0
-            mdPreview = vm.forceSourceMode.not() && isMarkdownName(newTitle)
+            // The tab owns its preview mode now; beginSession only applies the
+            // extension-based default the first time a document is opened.
+            vm.beginSession(isMarkdownName(newTitle))
             previewAnchors.clear()
-            pendingAnchor = DocumentAnchor(0, textTop)
-            scope.launch { editorScroll.scrollTo(0); previewScroll.scrollTo(0) }
+            pendingScrollY = vm.scrollYFor(vm.activeTabId)
             dirSession++
+        }
+        fun selectTab(id: String) {
+            if (id == vm.activeTabId) return
+            saveScrollPosition()
+            vm.switchTab(id)
+        }
+        fun requestCloseTab(id: String) {
+            val tab = vm.tabs.firstOrNull { it.id == id } ?: return
+            val action: () -> Unit = {
+                val uri = tab.uri
+                val sharedWithAnotherTab = uri != null && vm.tabs.count { it.id != id && it.uri == uri } > 0
+                vm.closeTab(id)
+                // Persistable grants are a limited resource (~128 per app); a
+                // closed tab must not keep one alive.
+                if (uri != null && !sharedWithAnotherTab) releasePermission(uri)
+            }
+            if (tab.isDirty) { discardAction = action; showDiscardDialog = true } else action()
         }
         fun newFile(markdown: Boolean) {
             val action: () -> Unit = {
-                // vm.newDocument bumps documentSession, which drives the reset
-                // (including mdPreview = isMarkdownName(newTitle)).
-                vm.newDocument(markdown)
+                val tab = vm.activeTab
+                // "New" on an untouched blank document reuses that tab instead of
+                // stacking empty ones; anything else gets a real new tab.
+                val untouched = tab.uri == null && tab.editor.text.isEmpty() && !tab.isDirty &&
+                    tab.title == (if (markdown) EditorViewModel.UNTOOLED_MD else EditorViewModel.UNTOOLED_TXT)
+                if (!untouched && !vm.newDocument(markdown)) {
+                    notifyMessage(getString(R.string.tab_limit_reached))
+                }
             }
             if (isDirty) { discardAction = action; showDiscardDialog = true } else action()
         }
@@ -620,6 +696,19 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(documentSession) {
             if (vm.surfaceSession != documentSession) { vm.surfaceSession = documentSession; onNewDocumentSession(vm.title) }
         }
+        // Applied once the new text has been measured: a lazily hydrated tab
+        // arrives with an empty buffer first, where a large scroll would clamp
+        // to 0 and be lost.
+        LaunchedEffect(documentSession, text, mdPreview) {
+            val target = pendingScrollY ?: return@LaunchedEffect
+            // A lazily hydrated tab shows an empty buffer first; keep the target
+            // and wait for the real text instead of clamping it to zero.
+            if (text.isEmpty()) return@LaunchedEffect
+            withFrameNanos { }; withFrameNanos { }
+            val scroll = if (mdPreview) previewScroll else editorScroll
+            scroll.scrollTo(target.coerceIn(0, scroll.maxValue))
+            pendingScrollY = null
+        }
         // Ask the editor surface to open Save As after a denied write.
         LaunchedEffect(Unit) { for (unit in saveAsFallback) { showFormatChoice = true } }
         // Suggest a writing direction only when the opened document clearly
@@ -659,7 +748,20 @@ class MainActivity : ComponentActivity() {
                         onDirRequest = { showDirMenu = true },
                         onHelpRequest = { showHelp = true },
                         onFind = { if (mdPreview) switchMode(); finding = true },
-                        compact = compactChrome
+                        compact = compactChrome,
+                        fontSize = fontSize,
+                        onFontSize = { size ->
+                            fontSize = size.coerceIn(13f, 30f)
+                            prefs.edit().putFloat("document_font_size", fontSize).apply()
+                        }
+                    )
+                    // Gone in landscape-with-keyboard: it would push the line
+                    // being typed down by 38dp for no benefit.
+                    if (!compactChrome) TabStrip(
+                        tabs = vm.tabs,
+                        activeId = vm.activeTabId,
+                        onSelect = ::selectTab,
+                        onClose = ::requestCloseTab,
                     )
                     }
                 },
@@ -800,7 +902,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
-            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; vm.newDocument(false) }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
+            if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; vm.discardActiveTab() }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
             pendingIncoming?.let { uri -> AlertDialog(onDismissRequest = { pendingIncoming = null }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { pendingIncoming = null; openIncoming(uri) }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { pendingIncoming = null }) { Text(stringResource(R.string.cancel)) } }) }
             if (dirSuggest != null) {
                 val toRtl = dirSuggest == true
@@ -808,7 +910,7 @@ class MainActivity : ComponentActivity() {
                     onDismissRequest = { dirSuggest = null },
                     title = { Text(stringResource(if (toRtl) R.string.dir_sug_title_fa else R.string.dir_sug_title_en)) },
                     text = { Text(stringResource(if (toRtl) R.string.dir_sug_text_fa else R.string.dir_sug_text_en)) },
-                    confirmButton = { TextButton(onClick = { docRtl = toRtl; dirSuggest = null }) { Text(stringResource(if (toRtl) R.string.dir_sug_go_rtl else R.string.dir_sug_go_ltr)) } },
+                    confirmButton = { TextButton(onClick = { vm.applyDirection(toRtl); dirSuggest = null }) { Text(stringResource(if (toRtl) R.string.dir_sug_go_rtl else R.string.dir_sug_go_ltr)) } },
                     dismissButton = { TextButton(onClick = { dirSuggest = null }) { Text(stringResource(if (toRtl) R.string.dir_sug_keep_ltr else R.string.dir_sug_keep_rtl)) } }
                 )
             }
@@ -817,8 +919,8 @@ class MainActivity : ComponentActivity() {
                 title = { Text(stringResource(R.string.dir_menu)) },
                 text = {
                     Column {
-                        dirOption(stringResource(R.string.dir_ltr), !docRtl) { docRtl = false; showDirMenu = false }
-                        dirOption(stringResource(R.string.dir_rtl), docRtl) { docRtl = true; showDirMenu = false }
+                        dirOption(stringResource(R.string.dir_ltr), !docRtl) { vm.applyDirection(false); showDirMenu = false }
+                        dirOption(stringResource(R.string.dir_rtl), docRtl) { vm.applyDirection(true); showDirMenu = false }
                     }
                 },
                 confirmButton = { },
@@ -879,7 +981,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false) {
+    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false, fontSize: Float = 17f, onFontSize: (Float) -> Unit = {}) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = if (compact) 0.dp else 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(if (compact) 44.dp else 72.dp).padding(horizontal = if (compact) 12.dp else 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -903,6 +1005,16 @@ class MainActivity : ComponentActivity() {
                 DropdownMenuItem(text = { Text(stringResource(R.string.dir_menu)) }, onClick = { onDirRequest(); expanded = false })
                 if (isMarkdown) DropdownMenuItem({ Text(stringResource(if (previewing) R.string.edit_md else R.string.preview_md)) }, onClick = { onTogglePreview(); expanded = false })
                 DropdownMenuItem({ Text(stringResource(R.string.find)) }, onClick = { onFind(); expanded = false })
+                // Font size stepper: - [17] + with a reset. Kept in the menu so a
+                // document-level value does not take a permanent toolbar slot.
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.font_size), modifier = Modifier.weight(1f), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    FontStep("−", enabled = fontSize > 13f) { onFontSize(fontSize - 1f) }
+                    Box(Modifier.widthIn(min = 34.dp), contentAlignment = Alignment.Center) {
+                        Text("${fontSize.toInt()}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    FontStep("+", enabled = fontSize < 30f) { onFontSize(fontSize + 1f) }
+                }
                 DropdownMenuItem({ Text(stringResource(R.string.discard)) }, onClick = { onDiscardRequest(); expanded = false })
                 DropdownMenuItem({ Text(stringResource(R.string.help)) }, onClick = { onHelpRequest(); expanded = false })
                 DropdownMenuItem({ Text(stringResource(R.string.about)) }, onClick = { about = true; expanded = false })
@@ -911,6 +1023,24 @@ class MainActivity : ComponentActivity() {
         if (about) {
             val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2" } catch (_: Exception) { "1.2" }
             AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Text Editor") }, text = { Text(stringResource(R.string.about_body, version)) }, confirmButton = { TextButton(onClick = { about = false }) { Text(stringResource(R.string.close)) } })
+        }
+    }
+
+    /** One side of the font stepper; disabled at the 13sp/30sp ends instead of silently clamping. */
+    @Composable private fun FontStep(label: String, enabled: Boolean, onClick: () -> Unit) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                label,
+                fontSize = 20.sp,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            )
         }
     }
 
