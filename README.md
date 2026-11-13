@@ -13,7 +13,8 @@ Hermes Text Editor is made for distraction-free writing: open a file, write comf
 - Press and hold **Save ▲** to use:
   - **Save as…** — save a copy with a new filename, folder, or `.txt` / `.md` extension while preserving the exact original content
   - **Export as plain text…** — create a separate readable `.txt` copy of a Markdown document without Markdown symbols
-- Automatic local draft recovery
+- Automatic local draft recovery, per tab
+- Up to ten open documents in a tab strip; each tab keeps its own unsaved draft, scroll position, Markdown preview mode and writing direction
 - **Undo** and **Redo** using compact floating controls; history is local and bounded, and rapid typing is grouped into practical undo steps
 - **Find in current document** with match highlighting, current/total result count, and previous/next navigation
 - **Two-finger text zoom** in the editor and Markdown Preview; your selected text size is stored locally
@@ -75,10 +76,18 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 - Android 6.0 (API 23) or later
 
+## Tabs
+
+A strip under the header shows every open document. Tap a tab to switch to it; the dot before its name means it has unsaved changes, and **×** closes it. Closing a tab that has unsaved changes asks first.
+
+Each tab keeps its own draft, undo history, scroll position, Markdown preview state and writing direction, so switching away and back returns you to the same place. A file that is already open is never opened twice: choosing it again switches to its tab instead.
+
+Up to ten documents can stay open, and the app refuses new tabs once the combined text approaches its memory budget, rather than letting Android kill the app while you type.
+
 ## Current version
 
-- **Version:** 1.5
-- **Version code:** 6
+- **Version:** 1.6
+- **Version code:** 7
 - **Package:** `com.asoraksh.hermeseditor`
 
 ## Independent project notice

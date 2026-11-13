@@ -12,8 +12,8 @@ android {
         applicationId = "com.asoraksh.hermeseditor"
         minSdk = 23
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
     }
 
     signingConfigs {
@@ -60,4 +60,9 @@ dependencies {
     implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
     implementation("org.commonmark:commonmark-ext-task-list-items:0.30.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM unit tests. org.json is a stub in android.jar unit tests, so the real
+    // implementation is added here; the manifest codec is pure Kotlin otherwise.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
