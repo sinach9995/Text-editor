@@ -132,6 +132,10 @@ class MainActivity : ComponentActivity() {
                 vm.switchTab(existing.id)
                 return@let
             }
+            // The read below is async: pin the tab NOW. Resolving activeTab
+            // after the read is what let an opened file overwrite whichever
+            // tab the user had switched to in the meantime.
+            val tabId = vm.activeTabId
             lifecycleScope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching { contentResolver.openInputStream(target)?.let { BoundedReader.readText(it) } }
@@ -140,10 +144,10 @@ class MainActivity : ComponentActivity() {
                 when {
                     result.exceptionOrNull() is BoundedReader.TooLargeException ->
                         notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
-                    // Leave the current buffer untouched; clearing it here would
+                    // Leave both buffers untouched; clearing one here would
                     // destroy whatever the user was working on.
                     text == null -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
-                    else -> vm.setDocument(target, displayName(target), text)
+                    else -> vm.setDocument(tabId, target, displayName(target), text)
                 }
             }
         }
@@ -200,6 +204,9 @@ class MainActivity : ComponentActivity() {
         val store = PrefsSessionStore(this)
         vm.attachStore(store)
         vm.attachDraft(File(filesDir, "draft.txt"))
+        // A tab that points at a new uri drops the old grant; only the Activity
+        // can release it, only the tab model knows when the last reference goes.
+        vm.onReleaseUriPermission = ::releasePermission
 
         // A replayed launch intent must NOT overwrite unsaved edits on a
         // recreation (rotation, language switch, process death). Only a truly
@@ -266,6 +273,7 @@ class MainActivity : ComponentActivity() {
             vm.switchTab(existing.id)
             return
         }
+        val tabId = vm.activeTabId
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { contentResolver.openInputStream(uri)?.let { BoundedReader.readText(it) } }
@@ -275,13 +283,17 @@ class MainActivity : ComponentActivity() {
                 result.exceptionOrNull() is BoundedReader.TooLargeException ->
                     notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
                 // On failure leave the current document alone rather than blanking it.
-                text != null -> vm.setDocument(uri, displayName(uri), text)
+                text != null -> vm.setDocument(tabId, uri, displayName(uri), text)
                 else -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
             }
         }
     }
     private fun saveToUri(uri: Uri) {
-        val draft = vm.editor.text
+        // Pin the tab: the write below is async, and a tab switch in that window
+        // used to move the new uri, title and clean flag onto the OTHER tab --
+        // which then saved its own text into this file on the next Save.
+        val tabId = vm.activeTabId
+        val draft = vm.textOf(tabId) ?: return
         // A CreateDocument grant is temporary: without persisting it here the
         // file cannot be reopened after process death.
         takePersistablePermissions(uri)
@@ -298,18 +310,19 @@ class MainActivity : ComponentActivity() {
                 // user pick a new target instead of losing the write.
                 fallbackSaveAsAfterDenied(failure)
             } else {
-                vm.setDocumentUri(uri)
-                vm.renameTitle(displayName(uri))
+                vm.setDocumentUri(tabId, uri)
+                vm.renameTitle(tabId, displayName(uri))
                 // Text typed while the write was in flight is not in the file.
                 // Clearing the dirty flag and retiring the recovery draft here
                 // would report it saved and drop the only copy of those keys.
-                if (vm.editor.text == draft) vm.markClean()
+                if (vm.sameText(tabId, draft)) vm.markClean(tabId)
                 notifyMessage(getString(R.string.saved, displayName(uri)))
             }
         }
     }
     private fun saveAsToUri(uri: Uri) {
-        val draft = vm.editor.text
+        val tabId = vm.activeTabId
+        val draft = vm.textOf(tabId) ?: return
         takePersistablePermissions(uri)
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
@@ -319,11 +332,11 @@ class MainActivity : ComponentActivity() {
                 }.isSuccess
             }
             if (ok) {
-                vm.setDocumentUri(uri)
-                vm.renameTitle(displayName(uri))
+                vm.setDocumentUri(tabId, uri)
+                vm.renameTitle(tabId, displayName(uri))
                 // Same guard as saveToUri: only retire the draft when the file
                 // holds exactly the text on screen.
-                if (vm.editor.text == draft) vm.markClean()
+                if (vm.sameText(tabId, draft)) vm.markClean(tabId)
                 notifyMessage(getString(R.string.saved_copy, displayName(uri)))
             } else {
                 // The picked target failed for an unknown reason; "read-only" plus
@@ -420,7 +433,11 @@ class MainActivity : ComponentActivity() {
         var finding by rememberSaveable { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
         var matchIndex by remember { mutableStateOf(0) }
-        val matches = remember(text, query) { findMatches(text, query) }
+        // Only scan while the Find bar is open: findMatches collects EVERY hit,
+        // and this ran on each keystroke of a 5 MB document with the bar shut.
+        val matches = remember(text, query, finding) {
+            if (finding) findMatches(text, query) else emptyList<IntRange>()
+        }
         val activeMatch = if (finding) matches.getOrNull(matchIndex.coerceAtMost((matches.size - 1).coerceAtLeast(0)))?.let { TextRange(it.first, it.last + 1) } else null
         val editorScroll = rememberScrollState()
         var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -653,7 +670,9 @@ class MainActivity : ComponentActivity() {
                     notifyMessage(getString(R.string.tab_limit_reached))
                 }
             }
-            if (isDirty) { discardAction = action; showDiscardDialog = true } else action()
+            // No warning here: "New" adds a tab and leaves the current one
+            // intact, so asking about discarding text was a lie.
+            action()
         }
         fun setLang(code: String) {
             if (code == lang) return

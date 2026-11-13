@@ -35,7 +35,8 @@ class EditorHistory(
         lastMillis = 0
     }
 
-    fun reset(snapshot: EditorSnapshot) {
+    /** Clears both stacks. There is no snapshot to restore: the caller owns the text. */
+    fun reset() {
         undoStack.clear(); redoStack.clear()
         breakCoalescing()
     }
