@@ -506,6 +506,29 @@ class EditorViewModel : ViewModel() {
     /** v1.5-compatible name: a new document is a new tab. */
     fun newDocument(markdown: Boolean): Boolean = newTab(markdown)
 
+    /**
+     * Opens a document that came from outside the editor -- the Open dialog, a
+     * file-manager share, an ACTION_VIEW -- in a tab of its OWN.
+     *
+     * Open used to load into whatever tab was active, so the document the user
+     * was reading vanished from the strip and its place was taken by the file
+     * they picked. That is "New" in reverse: the strip is a list of open
+     * documents, and opening one must add to it, never swap its contents.
+     *
+     * Returns the new tab id, or null when the tab budget refuses another tab
+     * (the caller then leaves both the strip and the file untouched).
+     */
+    fun openInNewTab(uri: Uri?, newTitle: String, text: String): String? {
+        if (!canOpenAnotherTab()) return null
+        val tab = TabState(nextId())
+        tab.hydrated = true
+        scheduleFlush(activeTab)
+        _tabs.add(tab)
+        activeTabId = tab.id
+        setDocument(tab.id, uri, newTitle, text)
+        return tab.id
+    }
+
     /** Clears the active tab back to an empty untitled document (the Discard action). */
     fun discardActiveTab() = setDocument(activeTabId, null, UNTOOLED_TXT, "")
 

@@ -128,7 +128,9 @@ check("attachDraft keeps the v1.5 signature", "fun attachDraft(recoveryFile: Fil
 
 # --- Incoming intent wins over restore -----------------------------------
 check("setDocument invalidates an in-flight hydrate", "tab.loadToken++" in set_doc)
-check("incoming file asks before replacing dirty text", "if (vm.isDirty) pendingIncoming = uri else openIncoming(uri)" in MAIN)
+check("an incoming file opens beside the open documents, not over them",
+      "openIncoming(uri)" in MAIN and "pendingIncoming" not in MAIN
+      and "vm.openInNewTab(uri, displayName(uri), text)" in MAIN)
 
 # --- Grants ---------------------------------------------------------------
 check("saveToUri persists the grant", "takePersistablePermissions(uri)" in save_to)
@@ -185,8 +187,15 @@ check("the legacy draft is adopted into the tab's own draft file",
 check("document operations take the tab id instead of resolving activeTab",
       "fun setDocument(tabId: String" in VM and "fun setDocumentUri(tabId: String" in VM
       and "fun renameTitle(tabId: String" in VM)
-check("open paths pin the tab before the async read",
-      "val tabId = vm.activeTabId" in open_doc and "val tabId = vm.activeTabId" in open_in)
+check("open paths add a tab instead of replacing the active one",
+      "vm.openInNewTab(target, displayName(target), text)" in open_doc
+      and "vm.openInNewTab(uri, displayName(uri), text)" in open_in
+      and "vm.setDocument(tabId" not in open_doc and "vm.setDocument(tabId" not in open_in)
+check("a share on cold start rebuilds the tab strip before it is applied",
+      MAIN.index("restoreLastSession(legacy, store)") < MAIN.index("if (incoming != null) handleIncomingIntent(incoming)"))
+check("the font menu anchors the first visible line",
+      "topVisibleAnchor()" in MAIN and "settleAnchor(anchor, expected)" in MAIN
+      and "settleAnchor(anchor, null)" in MAIN)
 check("a replaced uri gives its SAF grant back", "onReleaseUriPermission" in VM
       and "onReleaseUriPermission = ::releasePermission" in MAIN)
 check("New no longer claims it will discard the current text",

@@ -104,8 +104,8 @@ for key in ("font_size", "tab_limit_reached"):
           f'name="{key}"' in STRINGS_EN and f'name="{key}"' in STRINGS_FA)
 
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.6.1", 'versionName = "1.6.1"' in GRADLE)
-check("versionCode was bumped past 1.6", "versionCode = 8" in GRADLE)
+check("versionName is 1.6.2", 'versionName = "1.6.2"' in GRADLE)
+check("versionCode was bumped past 1.6.1", "versionCode = 9" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover the codec and the reader",
