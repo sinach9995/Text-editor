@@ -23,27 +23,35 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
  * The tab strip: one tab per open document, directly under the top bar.
  *
- * The active tab is drawn as a cut-out of the page, not as a chip floating on
- * the bar: it takes the page colour, keeps its top corners rounded, loses its
- * bottom corners and sits flush against the content below, so the strip and the
- * text read as one surface. A 2dp accent line marks it in the light theme,
- * where the two colours are almost identical.
+ * The active tab is a cut-out of the page, not a chip floating on the bar: it
+ * takes the page colour, starts where the top bar ends, drops its bottom
+ * corners for two concave feet that bend into the text below, and is drawn per
+ * tab, so the feet travel with the tab as the strip scrolls.
  *
  * Deliberately thin: it renders [TabState] snapshots and reports intent, so all
  * the state lives in the ViewModel and none of it is duplicated here.
@@ -65,12 +73,13 @@ fun TabStrip(
     }
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         LazyRow(
-            modifier = modifier.fillMaxWidth().height(54.dp),
+            modifier = modifier.fillMaxWidth().height(42.dp),
             state = listState,
-            contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 12.dp),
+            // No top padding: the active tab starts exactly where the top bar
+            // ends. The closed tabs are just 2dp shorter, so their gap reads as
+            // "not open" instead of pushing the whole row down.
+            contentPadding = PaddingValues(start = 10.dp, end = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            // Bottom-aligned, so the active tab touches the page and the
-            // inactive ones stay visibly docked above it.
             verticalAlignment = Alignment.Bottom,
         ) {
             items(tabs, key = { it.id }) { tab ->
@@ -94,18 +103,17 @@ private fun TabChip(
     onSelect: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val pageColor = MaterialTheme.colorScheme.background
     val barColor = MaterialTheme.colorScheme.surface
     val chipColor = MaterialTheme.colorScheme.surfaceVariant
-    val background = if (active) pageColor else chipColor.copy(alpha = if (barColor.perceivedBrightness() > 0.5f) 0.7f else 0.55f)
+    val background = if (active) MaterialTheme.colorScheme.background
+    else chipColor.copy(alpha = if (barColor.perceivedBrightness() > 0.5f) 0.7f else 0.55f)
     val textColor =
         if (active) MaterialTheme.colorScheme.onBackground
         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-    val shape = if (active) RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
-    else RoundedCornerShape(12.dp)
-    // Only the active tab reaches the page edge; the others keep a small gap
-    // so the strip reads as a shelf with one open drawer.
-    val height = if (active) 42.dp else 38.dp
+    // The open tab owns the full 42dp and is welded to the page; a closed one is
+    // 40dp, so it hangs 2dp below the top bar and reads as a separate sheet.
+    val height = if (active) 42.dp else 40.dp
+    val shape = if (active) MergedTabShape() else RoundedCornerShape(12.dp)
     Column(
         modifier = Modifier
             .height(height)
@@ -150,32 +158,76 @@ private fun TabChip(
 }
 
 /**
- * A title wider than the tab can be dragged sideways to reveal its end, which
- * a plain ellipsis can never do. The drag is enabled only after a measurement
- * says the text actually overflows: attaching the scrollable unconditionally
- * would swallow the strip's own horizontal drag, and re-measuring inside it
- * would then report "no overflow" and flip it back every frame. So the flag
- * latches on first overflow and resets only when the title itself changes.
+ * A title wider than its tab can be dragged sideways to reveal the end, which
+ * an ellipsis can never do.
+ *
+ * The overflow decision comes from measuring the raw text, not from reading the
+ * layout result: with `softWrap = false` a clipped [Text] does not reliably
+ * report `didOverflowWidth`, and an earlier version that waited for it never
+ * enabled the drag at all. Measuring up front also avoids the feedback loop of
+ * a scrollable that re-measures its child with unbounded width.
  */
 @Composable
 private fun ScrollingTitle(title: String, color: Color, active: Boolean) {
-    var overflow by remember(title) { mutableStateOf(false) }
+    val style = TextStyle(
+        fontSize = if (active) 14.sp else 13.sp,
+        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+    )
+    val maxWidth = if (active) 176.dp else 160.dp
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val overflow = remember(title, style, maxWidth, density) {
+        val natural = measurer.measure(AnnotatedString(title), style, softWrap = false, maxLines = 1)
+        natural.size.width > with(density) { maxWidth.toPx() }
+    }
     val scroll = rememberScrollState()
     Box(
         Modifier
-            .widthIn(max = 172.dp)
+            .widthIn(max = maxWidth)
             .then(if (overflow) Modifier.horizontalScroll(scroll) else Modifier)
     ) {
         Text(
             text = title,
             color = color,
-            fontSize = if (active) 14.sp else 13.sp,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            style = style,
             maxLines = 1,
             softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-            onTextLayout = { result -> if (!overflow && result.didOverflowWidth) overflow = true },
+            overflow = if (overflow) TextOverflow.Clip else TextOverflow.Ellipsis,
         )
+    }
+}
+
+/**
+ * The active tab's outline: rounded on top, welded to the page below by two
+ * concave quarter-circles whose centres sit on the page edge. The outline
+ * therefore leaves the tab's sides and bends *into* the text surface instead of
+ * ending in a square corner, so tab and document read as one sheet of paper.
+ *
+ * It is a per-tab shape, so the feet move with the tab while the strip scrolls.
+ */
+private class MergedTabShape(
+    private val topRadius: Dp = 14.dp,
+    private val foot: Dp = 12.dp,
+) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val w = size.width
+        val h = size.height
+        val tr = with(density) { topRadius.toPx() }.coerceAtMost(h / 2f)
+        val f = with(density) { foot.toPx() }.coerceAtMost(w / 3f)
+        val path = Path().apply {
+            moveTo(0f, tr)
+            quadraticBezierTo(0f, 0f, tr, 0f)
+            lineTo(w - tr, 0f)
+            quadraticBezierTo(w, 0f, w, tr)
+            lineTo(w, h - f)
+            // Bottom-right foot: leave the right edge and curve onto the page edge.
+            arcTo(Rect(w - f, h - f, w + f, h + f), 270f, -90f, false)
+            lineTo(f, h)
+            // Bottom-left foot, mirror image.
+            arcTo(Rect(-f, h - f, f, h + f), 0f, -90f, false)
+            close()
+        }
+        return Outline.Generic(path)
     }
 }
 
