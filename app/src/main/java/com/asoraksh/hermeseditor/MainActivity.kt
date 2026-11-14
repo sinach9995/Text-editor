@@ -28,7 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,8 +49,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -132,6 +133,9 @@ class MainActivity : ComponentActivity() {
                 vm.switchTab(existing.id)
                 return@let
             }
+            // The read below is async. Nothing is pinned to a tab any more:
+            // the file gets a tab of its own once it has been read, so a tab
+            // switch during the read cannot matter at all.
             lifecycleScope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching { contentResolver.openInputStream(target)?.let { BoundedReader.readText(it) } }
@@ -140,10 +144,11 @@ class MainActivity : ComponentActivity() {
                 when {
                     result.exceptionOrNull() is BoundedReader.TooLargeException ->
                         notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
-                    // Leave the current buffer untouched; clearing it here would
-                    // destroy whatever the user was working on.
+                    // Leave every buffer untouched; an empty tab here would be
+                    // an empty tab the user never asked for.
                     text == null -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
-                    else -> vm.setDocument(target, displayName(target), text)
+                    vm.openInNewTab(target, displayName(target), text) == null ->
+                        notifyMessage(getString(R.string.tab_limit_reached))
                 }
             }
         }
@@ -200,6 +205,9 @@ class MainActivity : ComponentActivity() {
         val store = PrefsSessionStore(this)
         vm.attachStore(store)
         vm.attachDraft(File(filesDir, "draft.txt"))
+        // A tab that points at a new uri drops the old grant; only the Activity
+        // can release it, only the tab model knows when the last reference goes.
+        vm.onReleaseUriPermission = ::releasePermission
 
         // A replayed launch intent must NOT overwrite unsaved edits on a
         // recreation (rotation, language switch, process death). Only a truly
@@ -207,14 +215,13 @@ class MainActivity : ComponentActivity() {
         val fresh = savedInstanceState == null
         val legacy = if (fresh) prefs.getString("draft", "")?.also { prefs.edit().remove("draft").apply() } else null
         val incoming = if (fresh) intent?.takeIf { it.data != null } else null
-        if (incoming != null) {
-            // An incoming ACTION_VIEW/SEND wins over the cold-start restore: it
-            // bumps the restore generation, so a late last_uri read is discarded.
-            handleIncomingIntent(incoming)
-        } else {
-            // Idempotent: a rotation reuses this ViewModel and returns at once.
-            restoreLastSession(legacy, store)
-        }
+        // The remembered tab strip is rebuilt FIRST, always. A share used to
+        // skip the restore entirely, so a file opened from the phone's file
+        // manager arrived as the only tab and the documents from the previous
+        // session looked gone. It now lands beside them, in its own tab.
+        // Idempotent: a rotation reuses this ViewModel and returns at once.
+        restoreLastSession(legacy, store)
+        if (incoming != null) handleIncomingIntent(incoming)
         setContent { HermesEditor() }
     }
 
@@ -247,15 +254,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // An incoming file waiting for the user to agree to replace unsaved text.
-    private var pendingIncoming by mutableStateOf<Uri?>(null)
-
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         // File-manager shares do not always grant persistent access; reading
         // must still work, so the permission calls are individually guarded.
         takePersistablePermissions(uri)
-        if (vm.isDirty) pendingIncoming = uri else openIncoming(uri)
+        // No discard question: the incoming file gets its own tab, so no open
+        // document is replaced and there is nothing to lose.
+        openIncoming(uri)
     }
 
     private fun openIncoming(uri: Uri) {
@@ -274,14 +280,19 @@ class MainActivity : ComponentActivity() {
             when {
                 result.exceptionOrNull() is BoundedReader.TooLargeException ->
                     notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
-                // On failure leave the current document alone rather than blanking it.
-                text != null -> vm.setDocument(uri, displayName(uri), text)
-                else -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                // On failure leave the strip alone rather than adding a blank tab.
+                text == null -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                vm.openInNewTab(uri, displayName(uri), text) == null ->
+                    notifyMessage(getString(R.string.tab_limit_reached))
             }
         }
     }
     private fun saveToUri(uri: Uri) {
-        val draft = vm.editor.text
+        // Pin the tab: the write below is async, and a tab switch in that window
+        // used to move the new uri, title and clean flag onto the OTHER tab --
+        // which then saved its own text into this file on the next Save.
+        val tabId = vm.activeTabId
+        val draft = vm.textOf(tabId) ?: return
         // A CreateDocument grant is temporary: without persisting it here the
         // file cannot be reopened after process death.
         takePersistablePermissions(uri)
@@ -298,18 +309,19 @@ class MainActivity : ComponentActivity() {
                 // user pick a new target instead of losing the write.
                 fallbackSaveAsAfterDenied(failure)
             } else {
-                vm.setDocumentUri(uri)
-                vm.renameTitle(displayName(uri))
+                vm.setDocumentUri(tabId, uri)
+                vm.renameTitle(tabId, displayName(uri))
                 // Text typed while the write was in flight is not in the file.
                 // Clearing the dirty flag and retiring the recovery draft here
                 // would report it saved and drop the only copy of those keys.
-                if (vm.editor.text == draft) vm.markClean()
+                if (vm.sameText(tabId, draft)) vm.markClean(tabId)
                 notifyMessage(getString(R.string.saved, displayName(uri)))
             }
         }
     }
     private fun saveAsToUri(uri: Uri) {
-        val draft = vm.editor.text
+        val tabId = vm.activeTabId
+        val draft = vm.textOf(tabId) ?: return
         takePersistablePermissions(uri)
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
@@ -319,11 +331,11 @@ class MainActivity : ComponentActivity() {
                 }.isSuccess
             }
             if (ok) {
-                vm.setDocumentUri(uri)
-                vm.renameTitle(displayName(uri))
+                vm.setDocumentUri(tabId, uri)
+                vm.renameTitle(tabId, displayName(uri))
                 // Same guard as saveToUri: only retire the draft when the file
                 // holds exactly the text on screen.
-                if (vm.editor.text == draft) vm.markClean()
+                if (vm.sameText(tabId, draft)) vm.markClean(tabId)
                 notifyMessage(getString(R.string.saved_copy, displayName(uri)))
             } else {
                 // The picked target failed for an unknown reason; "read-only" plus
@@ -400,7 +412,6 @@ class MainActivity : ComponentActivity() {
         val text = editor.text
         val history = vm.history
         val historyTick by vm::historyTick
-        val isDirty by vm::isDirty
         var pastedEdit by remember { mutableStateOf(false) }
         val systemClipboard = androidx.compose.ui.platform.LocalClipboardManager.current
         val editorClipboard = remember(systemClipboard, history) {
@@ -420,7 +431,11 @@ class MainActivity : ComponentActivity() {
         var finding by rememberSaveable { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
         var matchIndex by remember { mutableStateOf(0) }
-        val matches = remember(text, query) { findMatches(text, query) }
+        // Only scan while the Find bar is open: findMatches collects EVERY hit,
+        // and this ran on each keystroke of a 5 MB document with the bar shut.
+        val matches = remember(text, query, finding) {
+            if (finding) findMatches(text, query) else emptyList<IntRange>()
+        }
         val activeMatch = if (finding) matches.getOrNull(matchIndex.coerceAtMost((matches.size - 1).coerceAtLeast(0)))?.let { TextRange(it.first, it.last + 1) } else null
         val editorScroll = rememberScrollState()
         var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -508,6 +523,61 @@ class MainActivity : ComponentActivity() {
             previewAnchors.clear()
             vm.togglePreview()
         }
+        /**
+         * The first line of the visible area, as an offset plus the screen y it
+         * currently occupies. A font change reflows every wrapped line, so the
+         * raw pixel offset no longer means the same paragraph: the reader used
+         * to land somewhere else with no way back to their place. Anchoring the
+         * top line keeps what they were reading exactly where it was.
+         */
+        fun topVisibleAnchor(): DocumentAnchor {
+            val layout = textLayout ?: return DocumentAnchor(0, textTop)
+            // TextLayoutResult has no vertical-offset lookup: ask for the
+            // character at the top edge, then take its line.
+            val atTop = layout.getOffsetForPosition(Offset(0f, editorScroll.value + 1f))
+            val line = layout.getLineForOffset(atTop).coerceIn(0, (layout.lineCount - 1).coerceAtLeast(0))
+            return DocumentAnchor(layout.getLineStart(line), layout.getLineTop(line) + textTop - editorScroll.value)
+        }
+        /**
+         * Puts [anchor] back at the screen y it was captured at, once the layout
+         * has settled on [expected] (null: two frames are enough).
+         *
+         * A reflow of a multi-MB buffer lands a frame or two after the click.
+         * Correcting against the OLD layout restores the old offsets and the
+         * page jumps anyway, so wait (bounded) for a layout carrying the new
+         * size instead of counting frames and hoping.
+         */
+        suspend fun settleAnchor(anchor: DocumentAnchor, expected: TextUnit?) {
+            if (expected == null) {
+                withFrameNanos { }; withFrameNanos { }
+            } else {
+                var frames = 0
+                while (frames++ < 12 && textLayout?.layoutInput?.style?.fontSize != expected) withFrameNanos { }
+            }
+            withFrameNanos { }
+            val layout = textLayout ?: return
+            // A stale layout describes text we are no longer showing.
+            if (layout.layoutInput.text.text != text) return
+            val scroll = if (mdPreview) previewScroll else editorScroll
+            val y = if (mdPreview) previewAnchors.y(anchor.offset)?.plus(previewTop)
+                else layout.getCursorRect(anchor.offset.coerceIn(0, text.length)).top + textTop
+            if (y != null) scroll.scrollTo((y - anchor.screenY).toInt().coerceIn(0, scroll.maxValue))
+        }
+        /**
+         * One entry point for the menu's -/+ so every size change anchors. The
+         * correction runs as its own coroutine rather than through
+         * [pendingAnchor]: two consecutive clicks can capture the SAME anchor,
+         * and a LaunchedEffect keyed on it would never re-run for the second.
+         */
+        fun applyFontSize(size: Float) {
+            val next = size.coerceIn(13f, 30f)
+            if (next == fontSize) return
+            val anchor = if (mdPreview) captureAnchor(Offset(0f, previewTop)) else topVisibleAnchor()
+            val expected = if (mdPreview) null else next.sp
+            fontSize = next
+            prefs.edit().putFloat("document_font_size", next).apply()
+            scope.launch { settleAnchor(anchor, expected) }
+        }
         val startPinch: (Offset) -> Unit = { centroid ->
             pendingAnchor = null
             pinchScrollOwner?.cancel()
@@ -594,14 +664,8 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(mdPreview, pendingAnchor) {
             val anchor = pendingAnchor ?: return@LaunchedEffect
-            // Wait for the new font/mode to measure and publish source/block positions.
-            withFrameNanos { }; withFrameNanos { }
-            val y = if (mdPreview) previewAnchors.y(anchor.offset)?.plus(previewTop)
-                else textLayout?.getCursorRect(anchor.offset.coerceIn(0, text.length))?.top?.plus(textTop)
-            if (y != null) {
-                val scroll = if (mdPreview) previewScroll else editorScroll
-                scroll.scrollTo((y - anchor.screenY).toInt().coerceIn(0, scroll.maxValue))
-            }
+            // Wait for the new mode to measure and publish source/block positions.
+            settleAnchor(anchor, null)
             pendingAnchor = null
         }
         var discardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -653,7 +717,9 @@ class MainActivity : ComponentActivity() {
                     notifyMessage(getString(R.string.tab_limit_reached))
                 }
             }
-            if (isDirty) { discardAction = action; showDiscardDialog = true } else action()
+            // No warning here: "New" adds a tab and leaves the current one
+            // intact, so asking about discarding text was a lie.
+            action()
         }
         fun setLang(code: String) {
             if (code == lang) return
@@ -736,7 +802,6 @@ class MainActivity : ComponentActivity() {
                 topBar = {
                     Column {
                     TopBar(
-                        title = title,
                         theme = selectedTheme,
                         setTheme = { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() },
                         lang = lang,
@@ -750,10 +815,7 @@ class MainActivity : ComponentActivity() {
                         onFind = { if (mdPreview) switchMode(); finding = true },
                         compact = compactChrome,
                         fontSize = fontSize,
-                        onFontSize = { size ->
-                            fontSize = size.coerceIn(13f, 30f)
-                            prefs.edit().putFloat("document_font_size", fontSize).apply()
-                        }
+                        onFontSize = ::applyFontSize
                     )
                     // Gone in landscape-with-keyboard: it would push the line
                     // being typed down by 38dp for no benefit.
@@ -775,7 +837,7 @@ class MainActivity : ComponentActivity() {
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         onNew = { newFile(false) },
                         onNewMarkdown = { newFile(true) },
-                        onOpen = { val action = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) }; if (isDirty) { discardAction = action; showDiscardDialog = true } else { action() } },
+                        onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
                         onQuickSave = { vm.documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
                         onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
                         onExport = { exportDocument.launch(baseName(title) + ".txt") }
@@ -903,7 +965,6 @@ class MainActivity : ComponentActivity() {
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })
             if (showDiscardConfirm) AlertDialog(onDismissRequest = { showDiscardConfirm = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_clear)) }, confirmButton = { TextButton(onClick = { showDiscardConfirm = false; vm.discardActiveTab() }) { Text(stringResource(R.string.discard)) } }, dismissButton = { TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.cancel)) } })
-            pendingIncoming?.let { uri -> AlertDialog(onDismissRequest = { pendingIncoming = null }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { pendingIncoming = null; openIncoming(uri) }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { pendingIncoming = null }) { Text(stringResource(R.string.cancel)) } }) }
             if (dirSuggest != null) {
                 val toRtl = dirSuggest == true
                 AlertDialog(
@@ -981,16 +1042,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false, fontSize: Float = 17f, onFontSize: (Float) -> Unit = {}) {
+    @Composable private fun TopBar(theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false, fontSize: Float = 17f, onFontSize: (Float) -> Unit = {}) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = if (compact) 0.dp else 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(if (compact) 44.dp else 72.dp).padding(horizontal = if (compact) 12.dp else 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            // The icon and the app name are decoration; the document title is not.
+        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = if (compact) 0.dp else 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(if (compact) 44.dp else 58.dp).padding(horizontal = if (compact) 12.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The open document is named by its tab, one row below: repeating it
+            // here in the biggest type on screen named the same file twice.
             if (!compact) {
-                Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
-                Spacer(Modifier.width(12.dp))
+                Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)))
+                Spacer(Modifier.width(10.dp))
             }
-            Column(Modifier.weight(1f)) { if (!compact) Text("Hermes Text Editor", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(title, maxLines = 1, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState()), color = MaterialTheme.colorScheme.onSurface, fontSize = if (compact) 14.sp else 19.sp, fontWeight = FontWeight.SemiBold) }
+            Text(
+                "Hermes Text Editor",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = if (compact) 15.sp else 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Box { IconButton(onClick = { expanded = true }, modifier = Modifier.size(if (compact) 36.dp else 40.dp)) { Text("⋮", fontSize = if (compact) 22.sp else 30.sp) }; DropdownMenu(expanded, { expanded = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(if (theme == AppTheme.DARK) R.string.theme_to_light else R.string.theme_to_dark)) },

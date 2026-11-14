@@ -181,11 +181,25 @@ class EditorViewModel : ViewModel() {
 
     /**
      * Kept for the v1.5 call site: the Activity hands over the recovery file.
-     * Per-tab drafts live beside it, so only the parent directory matters now.
+     * Per-tab drafts live beside it, so only the parent directory matters for
+     * ordinary writes; the file itself is still read once, as the v1.5
+     * migration source (see [readDraft]).
      */
     fun attachDraft(recoveryFile: File) {
         draftDir = recoveryFile.parentFile
     }
+
+    /** v1.5's single recovery file. Read once, only when no manifest exists. */
+    private var legacyDraftFile: File? = null
+
+    /** The pre-1.5 preference hand-off, consumed by the first hydrate. */
+    private var pendingLegacyText: String? = null
+
+    /**
+     * The Activity owns the SAF grant; the tab model knows when one is dead.
+     * Called with the uri whose last reference just went away.
+     */
+    var onReleaseUriPermission: ((Uri) -> Unit)? = null
 
     // --- tabs -------------------------------------------------------------
 
@@ -197,20 +211,7 @@ class EditorViewModel : ViewModel() {
 
     fun canOpenAnotherTab(): Boolean = TabBudget.canAddTab(records())
 
-    fun totalChars(): Long = TabBudget.totalChars(records())
-
     private fun records(): List<TabRecord> = _tabs.map { it.record() }
-
-    fun findTabByKey(key: String?): TabState? {
-        if (key.isNullOrBlank()) return null
-        // Provider ids are the stable identity; the tail comparison covers the
-        // same file arriving from a different authority. getDocumentId() throws
-        // for non-document URIs, so the Activity normalises the key up front.
-        return _tabs.firstOrNull { tab ->
-            val uri = tab.uri?.toString() ?: return@firstOrNull false
-            uri == key || uri.substringAfterLast('/') == key.substringAfterLast('/')
-        }
-    }
 
     /** Returns false when the tab limit or the text budget refuses a new tab. */
     fun newTab(markdown: Boolean): Boolean {
@@ -309,15 +310,41 @@ class EditorViewModel : ViewModel() {
 
     // --- persistence ------------------------------------------------------
 
-    fun persistManifest() {
+    fun persistManifest(sync: Boolean = false) {
         val s = store ?: return
         if (_tabs.isEmpty()) return
-        s.saveManifest(TabManifest(records(), activeTabId))
+        s.saveManifest(TabManifest(records(), activeTabId), sync)
     }
 
     private fun draftFile(tab: TabState): File? {
         val dir = draftDir ?: return null
         return File(dir, "draft_${tab.id}.txt")
+    }
+
+    /**
+     * IO side of [hydrate]: the tab's own draft, else the v1.5 recovery source.
+     *
+     * v1.5 wrote unsaved text to filesDir/draft.txt, so an upgrade that only
+     * looked at draft_<id>.txt silently resurrected the SAVED file and left the
+     * unsaved text behind as an orphan. The legacy text is adopted into
+     * draft_<id>.txt here, before it is returned, so a crash between the read
+     * and the first edit cannot lose it a second time.
+     */
+    private fun readDraft(tab: TabState): String? {
+        draftFile(tab)?.takeIf { it.exists() }?.let { file ->
+            runCatching { BoundedReader.readText(file) }.getOrNull()?.let { return it }
+        }
+        val legacyFile = legacyDraftFile
+        val carried = pendingLegacyText ?: legacyFile
+            ?.takeIf { it.exists() }
+            ?.let { file -> runCatching { BoundedReader.readText(file) }.getOrNull() }
+        if (carried != null) {
+            writeDraft(tab, carried, tab.draftEpoch)
+            if (legacyFile != null && legacyFile != draftFile(tab) && legacyFile.exists()) {
+                runCatching { legacyFile.delete() }
+            }
+        }
+        return carried
     }
 
     /**
@@ -370,17 +397,13 @@ class EditorViewModel : ViewModel() {
         if (_tabs.isEmpty()) _tabs.add(TabState(TAB_1))
         activeTabId = manifest?.activeTabId?.takeIf { id -> _tabs.any { it.id == id } } ?: _tabs.first().id
 
-        // One-time migration of the v1.5 draft.txt into tab_1's draft file, so
-        // hydrate() finds it through the normal path.
-        if (!legacyDraft.isNullOrEmpty()) {
-            val first = _tabs.first()
-            val file = draftFile(first)
-            if (file != null && !file.exists()) {
-                val epoch = first.draftEpoch
-                val text = legacyDraft
-                scope.launch { withContext(Dispatchers.IO) { writeDraft(first, text, epoch) } }
-            }
-        }
+        // v1.5 kept unsaved text in ONE recovery file (filesDir/draft.txt) and
+        // in an older preference key -- never in prefs["draft"] as the only
+        // source. Queue both for hydrate() to read on IO. Nothing is written
+        // from here: the old code queued a write and then hydrated the very
+        // next line, so the read and the write raced on the IO pool.
+        pendingLegacyText = legacyDraft?.takeIf { it.isNotEmpty() }
+        if (manifest == null) legacyDraftFile = draftFile
         store?.clearLegacyDocument()
 
         hydrate(activeTab)
@@ -397,14 +420,14 @@ class EditorViewModel : ViewModel() {
         tab.loading = true
         val token = ++tab.loadToken
         scope.launch {
-            val draft = withContext(Dispatchers.IO) {
-                draftFile(tab)?.takeIf { it.exists() }?.let { file ->
-                    runCatching { BoundedReader.readText(file) }.getOrNull()
-                }
-            }
+            val draft = withContext(Dispatchers.IO) { readDraft(tab) }
             if (token != tab.loadToken || !_tabs.contains(tab)) return@launch
             if (draft != null) {
                 applyText(tab, draft, dirty = true)
+                // The legacy source is now this tab's own draft file; never
+                // seed another tab from it.
+                pendingLegacyText = null
+                legacyDraftFile = null
                 tab.loading = false
                 bumpSession()
                 persistManifest()
@@ -437,7 +460,7 @@ class EditorViewModel : ViewModel() {
 
     private fun applyText(tab: TabState, text: String, dirty: Boolean) {
         tab.editor = TextFieldValue(text)
-        tab.history.reset(snapshotOf(tab))
+        tab.history.reset()
         tab.charCount = text.length
         tab.isDirty = dirty
         tab.hydrated = true
@@ -454,18 +477,23 @@ class EditorViewModel : ViewModel() {
         EditorSnapshot(value.text, value.selection.start, value.selection.end)
 
     /**
-     * Applies an explicitly opened/created document to the active tab, and
-     * invalidates any hydrate still in flight for it.
+     * Applies an explicitly opened/created document to ONE tab, and invalidates
+     * any hydrate still in flight for it.
+     *
+     * The tab id is a parameter, not `activeTab`: the read that produced [text]
+     * ran on IO, and the user can switch tabs while it is in flight. Resolving
+     * the target afterwards is how an opened file used to land in -- and wipe --
+     * whichever tab happened to be active when the read finished.
      */
-    fun setDocument(uri: Uri?, newTitle: String, text: String) {
-        val tab = activeTab
+    fun setDocument(tabId: String, uri: Uri?, newTitle: String, text: String) {
+        val tab = _tabs.firstOrNull { it.id == tabId } ?: return
         retireDraft(tab)
         tab.loadToken++
         tab.loading = false
-        tab.uri = uri
+        replaceUri(tab, uri)
         tab.title = newTitle
         tab.editor = TextFieldValue(text)
-        tab.history.reset(snapshotOf(tab))
+        tab.history.reset()
         tab.charCount = text.length
         tab.isDirty = false
         tab.hydrated = true
@@ -478,21 +506,66 @@ class EditorViewModel : ViewModel() {
     /** v1.5-compatible name: a new document is a new tab. */
     fun newDocument(markdown: Boolean): Boolean = newTab(markdown)
 
+    /**
+     * Opens a document that came from outside the editor -- the Open dialog, a
+     * file-manager share, an ACTION_VIEW -- in a tab of its OWN.
+     *
+     * Open used to load into whatever tab was active, so the document the user
+     * was reading vanished from the strip and its place was taken by the file
+     * they picked. That is "New" in reverse: the strip is a list of open
+     * documents, and opening one must add to it, never swap its contents.
+     *
+     * Returns the new tab id, or null when the tab budget refuses another tab
+     * (the caller then leaves both the strip and the file untouched).
+     */
+    fun openInNewTab(uri: Uri?, newTitle: String, text: String): String? {
+        if (!canOpenAnotherTab()) return null
+        val tab = TabState(nextId())
+        tab.hydrated = true
+        scheduleFlush(activeTab)
+        _tabs.add(tab)
+        activeTabId = tab.id
+        setDocument(tab.id, uri, newTitle, text)
+        return tab.id
+    }
+
     /** Clears the active tab back to an empty untitled document (the Discard action). */
-    fun discardActiveTab() = setDocument(null, UNTOOLED_TXT, "")
+    fun discardActiveTab() = setDocument(activeTabId, null, UNTOOLED_TXT, "")
 
-    fun renameTitle(newTitle: String) {
-        if (activeTab.title != newTitle) activeTab.title = newTitle
+    fun renameTitle(tabId: String, newTitle: String) {
+        val tab = _tabs.firstOrNull { it.id == tabId } ?: return
+        if (tab.title != newTitle) tab.title = newTitle
         persistManifest()
     }
 
-    fun setDocumentUri(uri: Uri?) {
-        activeTab.uri = uri
+    fun setDocumentUri(tabId: String, uri: Uri?) {
+        val tab = _tabs.firstOrNull { it.id == tabId } ?: return
+        replaceUri(tab, uri)
         persistManifest()
     }
 
-    fun markClean() {
-        val tab = activeTab
+    /**
+     * Points a tab at a new uri and hands the old grant back when nothing else
+     * refers to it. Persistable grants are a limited resource (~128 per app)
+     * and a replaced uri used to keep its grant for the life of the process.
+     */
+    /** True when [text] is still exactly what [tabId] holds (a save raced the keyboard). */
+    /** The text a tab holds right now, or null when it is gone. */
+    fun textOf(tabId: String): String? = _tabs.firstOrNull { it.id == tabId }?.editor?.text
+
+    fun sameText(tabId: String, text: String): Boolean =
+        _tabs.firstOrNull { it.id == tabId }?.editor?.text == text
+
+    private fun replaceUri(tab: TabState, uri: Uri?) {
+        val old = tab.uri
+        tab.uri = uri
+        if (old != null && old != uri && _tabs.none { other -> other !== tab && other.uri == old }) {
+            onReleaseUriPermission?.invoke(old)
+        }
+    }
+
+    fun markClean(tabId: String = activeTabId) {
+        val tab = _tabs.firstOrNull { it.id == tabId } ?: return
         tab.isDirty = false
         retireDraft(tab)
         persistManifest()
@@ -571,6 +644,10 @@ class EditorViewModel : ViewModel() {
         tab.autosaveJob = scope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
             withContext(Dispatchers.IO) { writeDraft(tab, text, epoch) }
+            // The manifest carries charCount, and the budget check reads it
+            // after a cold start: a draft written without this line left the
+            // number stale and let the app overrun its own character budget.
+            if (epoch == tab.draftEpoch && tab.isDirty) persistManifest()
         }
     }
 
@@ -593,15 +670,9 @@ class EditorViewModel : ViewModel() {
     fun flushAutosave() {
         val tab = activeTab
         tab.autosaveJob?.cancel()
-        if (!tab.isDirty) return
+        if (!tab.isDirty) { persistManifest(sync = true); return }
         writeDraft(tab, tab.editor.text, tab.draftEpoch)
-        persistManifest()
-    }
-
-    /** Kept for the v1.5 call site: dropping the active tab's identity. */
-    fun forgetLastDocument() {
-        activeTab.uri = null
-        persistManifest()
+        persistManifest(sync = true)
     }
 
     override fun onCleared() {

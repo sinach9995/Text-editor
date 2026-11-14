@@ -29,7 +29,7 @@ data class TabManifest(val tabs: List<TabRecord>, val activeTabId: String)
  *
  * A malformed manifest must never lose work: [decode] returns null and the
  * caller falls back to the legacy single-document migration path, which still
- * finds draft_1.txt.
+ * finds the v1.5 recovery file draft.txt.
  */
 object TabManifestCodec {
 

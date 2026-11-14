@@ -51,8 +51,20 @@ topbar_call = body(MAIN, "Column {\n                    TopBar(")
 
 # --- Tab strip ------------------------------------------------------------
 check("TabStrip exists", bool(STRIP))
-check("strip is 38dp tall", "height(38.dp)" in STRIP)
-check("strip shows an unsaved dot", "if (dirty)" in STRIP and "5.dp" in STRIP)
+check("strip is 42dp tall, tabs fill it", "height(42.dp)" in STRIP and "var height = if (active) 42.dp else 40.dp" in STRIP.replace("val height", "var height"))
+check("strip shows an unsaved dot", "if (dirty)" in STRIP and "size(6.dp)" in STRIP)
+check("the active tab is cut out of the page, not floating on it",
+      "MergedTabShape()" in STRIP and "MaterialTheme.colorScheme.background" in STRIP)
+check("its feet reach the page through a visible S-curve, not a chamfer",
+      "lineTo(right, h - drop)" in STRIP
+      and "cubicTo(" in STRIP and "arcTo(" not in STRIP
+      and "left, h - drop," in STRIP
+      and "private class MergedTabShape" in STRIP)
+check("the strip starts flush under the top bar", "top = 12.dp" not in STRIP)
+check("a title wider than the tab can be dragged sideways",
+      "horizontalScroll(scroll)" in STRIP and "rememberTextMeasurer" in STRIP)
+check("the top bar no longer repeats the active tab's name",
+      "fun TopBar(theme: AppTheme" in MAIN and '"Hermes Text Editor",' in MAIN)
 check("strip closes with a dedicated hit target", "\"×\"" in STRIP and "onClose" in STRIP)
 check("strip scrolls and follows the active tab", "LazyRow" in STRIP and "animateScrollToItem(activeIndex)" in STRIP)
 check("strip is rendered under TopBar", "TabStrip(" in topbar_call)
@@ -103,9 +115,43 @@ for key in ("font_size", "tab_limit_reached"):
     check(f"string {key} exists in both locales",
           f'name="{key}"' in STRINGS_EN and f'name="{key}"' in STRINGS_FA)
 
+# --- Help text ------------------------------------------------------------
+import re as _re
+
+
+def _help(text, name):
+    block = _re.search(r'<string-array name="%s">(.*?)</string-array>' % name, text, _re.S).group(1)
+    return _re.findall(r"<item>(.*?)</item>", block, _re.S)
+
+
+for name in ("help_titles", "help_bodies"):
+    en, fa = _help(STRINGS_EN, name), _help(STRINGS_FA, name)
+    check(f"{name} has the same number of items in both locales", len(en) == len(fa))
+    check(f"{name} is not empty", len(en) > 0)
+
+titles_en, titles_fa = _help(STRINGS_EN, "help_titles"), _help(STRINGS_FA, "help_titles")
+check("help documents the tab strip", "Tabs" in titles_en and "تب‌ها" in titles_fa)
+check("help documents the session coming back",
+      "Reopening the app" in titles_en and "بازگشت به برنامه" in titles_fa)
+check("the tab topic describes the welded foot in both locales",
+      any("welded to the page" in b for b in _help(STRINGS_EN, "help_bodies"))
+      and any("پای قوسی" in b for b in _help(STRINGS_FA, "help_bodies")))
+
+# An unescaped apostrophe is a resource-compile failure, not a warning, and it
+# only shows up in CI because there is no SDK here to run aapt.
+for _name in ("help_titles", "help_bodies"):
+    for _loc, _text in (("en", STRINGS_EN), ("fa", STRINGS_FA)):
+        check(f"{_name} has no unescaped apostrophes ({_loc})",
+              all("'" not in _item for _item in _help(_text, _name)))
+
+# About must read the installed version, not a literal that drifts.
+check("About shows the installed version",
+      "getPackageInfo(packageName, 0).versionName" in MAIN
+      and "stringResource(R.string.about_body, version)" in MAIN)
+
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.6", 'versionName = "1.6"' in GRADLE)
-check("versionCode was bumped", "versionCode = 7" in GRADLE)
+check("versionName is 1.6.8", 'versionName = "1.6.8"' in GRADLE)
+check("versionCode was bumped past 1.6.2", "versionCode = 15" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover the codec and the reader",

@@ -18,7 +18,7 @@ import android.net.Uri
  */
 interface SessionStore {
     fun loadManifest(): TabManifest?
-    fun saveManifest(manifest: TabManifest)
+    fun saveManifest(manifest: TabManifest, sync: Boolean = false)
     fun clearManifest()
 
     /** Pre-v1.6 single-document identity, read once for the migration. */
@@ -34,10 +34,13 @@ class PrefsSessionStore(context: Context) : SessionStore {
 
     override fun loadManifest(): TabManifest? = TabManifestCodec.decode(prefs.getString(KEY_MANIFEST, null))
 
-    override fun saveManifest(manifest: TabManifest) {
-        // commit(), not apply(): onPause needs the bytes on disk before the
-        // process can be killed. The manifest is a few hundred bytes.
-        prefs.edit().putString(KEY_MANIFEST, TabManifestCodec.encode(manifest)).commit()
+    override fun saveManifest(manifest: TabManifest, sync: Boolean) {
+        // apply() unless the caller is onPause/onStop or a save boundary: those
+        // need the bytes on disk before the process can be killed. commit() on
+        // every structural change (preview toggle, direction, rename) blocked
+        // the UI thread on a disk fsync for a few hundred bytes each time.
+        val editor = prefs.edit().putString(KEY_MANIFEST, TabManifestCodec.encode(manifest))
+        if (sync) editor.commit() else editor.apply()
     }
 
     override fun clearManifest() {

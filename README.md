@@ -20,12 +20,12 @@ Hermes Text Editor is made for distraction-free writing: open a file, write comf
 - **Two-finger text zoom** in the editor and Markdown Preview; your selected text size is stored locally
 - Markdown Preview for headings, emphasis, lists, links, quotes, code blocks, and more
 - Live styled Markdown source editing: Markdown symbols remain visible and editable while the source receives readable visual styling
-- Long filenames stay on one header line and can be swiped sideways to reveal the full name
+- Long filenames stay on one tab line and can be swiped sideways to reveal the full name
 - Light and Dark themes
 - English and فارسی app interface
 - Right-to-left (RTL) and left-to-right (LTR) writing controls
 - A local direction suggestion when a clearly Persian or English document does not match the current writing direction
-- First-run guide in English and فارسی, plus an in-app Help & Guide that can be replayed
+- First-run guide in English and فارسی, plus an in-app Help & Guide that can be replayed; it documents the tab strip and the session that comes back with it
 
 ## Markdown support
 
@@ -80,14 +80,16 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 A strip under the header shows every open document. Tap a tab to switch to it; the dot before its name means it has unsaved changes, and **×** closes it. Closing a tab that has unsaved changes asks first.
 
+The open tab is not a floating chip: it takes the colour of the page and is welded to the text below it by a curved foot that leaves the tab's side vertically, sweeps outwards and lands flat on the page edge. The foot is drawn per tab, so it travels with the tab while the strip scrolls. A long tab name can be dragged sideways to read the rest of it, and the row scrolls sideways once the tabs no longer fit.
+
 Each tab keeps its own draft, undo history, scroll position, Markdown preview state and writing direction, so switching away and back returns you to the same place. A file that is already open is never opened twice: choosing it again switches to its tab instead.
 
 Up to ten documents can stay open, and the app refuses new tabs once the combined text approaches its memory budget, rather than letting Android kill the app while you type.
 
 ## Current version
 
-- **Version:** 1.6
-- **Version code:** 7
+- **Version:** 1.6.8
+- **Version code:** 15
 - **Package:** `com.asoraksh.hermeseditor`
 
 ## Independent project notice

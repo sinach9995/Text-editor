@@ -56,7 +56,9 @@ restore_last = body(MAIN, "private fun restoreLastSession(")
 
 # --- The manifest replaces single-document identity ----------------------
 check("SessionStore stores a tab manifest", "tabs_manifest" in STORE)
-check("manifest is written with commit(), not apply()", "commit()" in STORE and ".apply()" not in STORE)
+check("manifest write is async by default, sync on pause",
+      "if (sync) editor.commit() else editor.apply()" in STORE)
+check("the exit path asks for a synchronous manifest write", "persistManifest(sync = true)" in VM)
 check("manifest holds no document text", "editor.text" not in STORE and 'getString("draft"' not in STORE)
 check("legacy last_uri/last_title are still readable for the migration",
       '"last_uri"' in STORE and '"last_title"' in STORE)
@@ -75,7 +77,7 @@ check("restore persists the manifest it just built", "persistManifest()" in rest
 check("draft is read before the file", hydrate.find("draftFile(tab)") < hydrate.find("reader?.invoke(uri)"))
 check("a draft makes the tab dirty", "applyText(tab, draft, dirty = true)" in hydrate)
 check("a file read leaves the tab clean", "applyText(tab, text, dirty = false)" in hydrate)
-check("draft read is bounded", "BoundedReader.readText(file)" in hydrate)
+check("draft read is bounded", "BoundedReader.readText(file)" in body(VM, "private fun readDraft("))
 check("file read is bounded", "runCatching { reader?.invoke(uri) }" in hydrate)
 check("a hydrate that lost its tab is dropped", "_tabs.contains(tab)" in hydrate)
 check("an unreadable uri degrades to untitled instead of crashing", "tab.title = UNTOOLED_TXT" in hydrate)
@@ -126,7 +128,9 @@ check("attachDraft keeps the v1.5 signature", "fun attachDraft(recoveryFile: Fil
 
 # --- Incoming intent wins over restore -----------------------------------
 check("setDocument invalidates an in-flight hydrate", "tab.loadToken++" in set_doc)
-check("incoming file asks before replacing dirty text", "if (vm.isDirty) pendingIncoming = uri else openIncoming(uri)" in MAIN)
+check("an incoming file opens beside the open documents, not over them",
+      "openIncoming(uri)" in MAIN and "pendingIncoming" not in MAIN
+      and "vm.openInNewTab(uri, displayName(uri), text)" in MAIN)
 
 # --- Grants ---------------------------------------------------------------
 check("saveToUri persists the grant", "takePersistablePermissions(uri)" in save_to)
@@ -134,10 +138,11 @@ check("saveAsToUri persists the grant", "takePersistablePermissions(uri)" in sav
 check("closing a tab releases its grant", "releasePermission(uri)" in body(MAIN, "fun requestCloseTab("))
 
 # --- A save clears the dirty flag only when the file holds the live text --
-check("saveToUri compares written text with live text", "vm.editor.text == draft" in save_to)
+check("saveToUri compares the written text with that tab's live text",
+      "vm.sameText(tabId, draft)" in save_to and "val tabId = vm.activeTabId" in save_to)
 check("saveToUri clears dirty state only under the guard",
-      "if (vm.editor.text == draft) vm.markClean()" in save_to and save_to.count("vm.markClean()") == 1)
-check("saveAsToUri compares written text with live text", "vm.editor.text == draft" in save_as)
+      "if (vm.sameText(tabId, draft)) vm.markClean(tabId)" in save_to and save_to.count("markClean(") == 1)
+check("saveAsToUri compares written text with live text", "vm.sameText(tabId, draft)" in save_as)
 check("failed Save As does not re-open the Save As prompt",
       "fallbackSaveAsAfterDenied" not in save_as and "R.string.save_failed" in save_as)
 
@@ -170,6 +175,32 @@ for m in __import__("re").finditer(r"withContext\(Dispatchers\.IO\)", VM):
     if any(w in block for w in ("history.", "tab.editor =", "tab.title =", "tab.uri =", "tab.isDirty =")):
         unsafe.append(VM[:m.start()].count("\n") + 1)
 check(f"no state mutation inside any Dispatchers.IO block (offenders: {unsafe})", not unsafe)
+
+# --- v1.6.1: the four data-loss bugs must not come back -------------------
+new_file = body(MAIN, "fun newFile(")
+check("v1.5 recovery file is a hydrate source, not an orphan",
+      "legacyDraftFile" in restore and "legacyDraftFile" in body(VM, "private fun readDraft("))
+check("restore no longer queues a draft write (it raced the read)",
+      "scope.launch" not in restore and "writeDraft" not in restore)
+check("the legacy draft is adopted into the tab's own draft file",
+      "writeDraft(tab, carried, tab.draftEpoch)" in body(VM, "private fun readDraft("))
+check("document operations take the tab id instead of resolving activeTab",
+      "fun setDocument(tabId: String" in VM and "fun setDocumentUri(tabId: String" in VM
+      and "fun renameTitle(tabId: String" in VM)
+check("open paths add a tab instead of replacing the active one",
+      "vm.openInNewTab(target, displayName(target), text)" in open_doc
+      and "vm.openInNewTab(uri, displayName(uri), text)" in open_in
+      and "vm.setDocument(tabId" not in open_doc and "vm.setDocument(tabId" not in open_in)
+check("a share on cold start rebuilds the tab strip before it is applied",
+      MAIN.index("restoreLastSession(legacy, store)") < MAIN.index("if (incoming != null) handleIncomingIntent(incoming)"))
+check("the font menu anchors the first visible line",
+      "topVisibleAnchor()" in MAIN and "settleAnchor(anchor, expected)" in MAIN
+      and "settleAnchor(anchor, null)" in MAIN)
+check("a replaced uri gives its SAF grant back", "onReleaseUriPermission" in VM
+      and "onReleaseUriPermission = ::releasePermission" in MAIN)
+check("New no longer claims it will discard the current text",
+      not ("if (isDirty) { discardAction" in new_file) and "vm.newDocument(markdown)" in new_file)
+check("find only scans while the Find bar is open", "if (finding) findMatches(text, query)" in MAIN)
 
 if failures:
     print(f"\n{len(failures)} contract(s) failed")
