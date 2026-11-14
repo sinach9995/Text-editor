@@ -1031,16 +1031,21 @@ class MainActivity : ComponentActivity() {
 
                 }
                 }
-                // The Recent tab covers the page rather than replacing it: the
+                // The Recent page covers the page rather than replacing it: the
                 // document keeps its scroll, selection and text behind the list,
                 // so coming back from it costs nothing.
+                //
+                // It is a sibling of the editor Box, not a child, so it has to
+                // carry the window insets itself -- without this padding it
+                // started at the top of the window and the whole title block sat
+                // behind the header band.
                 if (vm.home) RecentPage(
                     files = recentList(),
                     openUris = vm.tabs.mapNotNull { it.uri?.toString() }.toSet(),
                     onNew = { newFile(false) },
                     onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
                     onFile = { openRecent(it) },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
                 )
             }
             if (showDiscardDialog) AlertDialog(onDismissRequest = { showDiscardDialog = false }, title = { Text(stringResource(R.string.discard_title)) }, text = { Text(stringResource(R.string.discard_open)) }, confirmButton = { TextButton(onClick = { showDiscardDialog = false; discardAction?.invoke() }) { Text(stringResource(R.string.cont)) } }, dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text(stringResource(R.string.cancel)) } })

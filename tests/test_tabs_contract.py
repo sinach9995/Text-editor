@@ -239,6 +239,8 @@ check("an empty session starts on Recent", "legacyDraft.isNullOrEmpty() && lastU
 check("an empty manifest is cleared instead of left to be restored", "s.clearManifest()" in VM)
 check("the Recent page covers the document instead of unmounting it",
       "if (vm.home) RecentPage(" in MAIN)
+check("Recent is inset below the header instead of starting at the window top",
+      "modifier = Modifier.fillMaxSize().padding(innerPadding)," in MAIN)
 check("tapping the corner menu in a document tab leaves Recent",
       "if (id == vm.activeTabId && !vm.home) return" in MAIN)
 
