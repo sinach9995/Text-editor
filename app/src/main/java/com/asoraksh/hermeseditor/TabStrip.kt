@@ -114,6 +114,10 @@ private fun TabChip(
     // 40dp, so it hangs 2dp below the top bar and reads as a separate sheet.
     val height = if (active) 42.dp else 40.dp
     val shape = if (active) MergedTabShape() else RoundedCornerShape(12.dp)
+    // The active tab's outline is inset by the foot width so the feet have room
+    // to flare outwards; content is pushed in by the same amount to stay centred
+    // in the visible body.
+    val inset = if (active) FOOT else 0.dp
     Column(
         modifier = Modifier
             .height(height)
@@ -125,12 +129,13 @@ private fun TabChip(
             Box(
                 Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = inset)
                     .height(2.dp)
                     .background(MaterialTheme.colorScheme.primary)
             )
         }
         Row(
-            modifier = Modifier.weight(1f).padding(start = 12.dp, end = 6.dp),
+            modifier = Modifier.weight(1f).padding(start = 12.dp + inset, end = 6.dp + inset),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (dirty) {
@@ -198,38 +203,45 @@ private fun ScrollingTitle(title: String, color: Color, active: Boolean) {
 }
 
 /**
- * The active tab's outline: rounded on top, welded to the page below by two
- * concave quarter-circles whose centres sit on the page edge. The outline
- * therefore leaves the tab's sides and bends *into* the text surface instead of
- * ending in a square corner, so tab and document read as one sheet of paper.
+ * The active tab's outline: rounded on top, and flared outwards at the bottom
+ * by two convex quarter-circles, so the tab is 2 x [FOOT] wider at the page edge
+ * than in its body. The sides therefore splay onto the page instead of meeting
+ * it at a right angle, and the tab reads as standing on the text rather than
+ * ending above it.
  *
- * It is a per-tab shape, so the feet move with the tab while the strip scrolls.
+ * The feet are convex (they bulge away from the tab). An earlier version curved
+ * them the other way, inwards, which looked like the tab was being pinched.
+ *
+ * It is a per-tab shape, so the feet travel with the tab while the strip scrolls.
  */
 private class MergedTabShape(
     private val topRadius: Dp = 14.dp,
-    private val foot: Dp = 12.dp,
 ) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val w = size.width
         val h = size.height
         val tr = with(density) { topRadius.toPx() }.coerceAtMost(h / 2f)
-        val f = with(density) { foot.toPx() }.coerceAtMost(w / 3f)
+        val f = with(density) { FOOT.toPx() }.coerceAtMost(size.width / 4f)
+        val left = f
+        val right = size.width - f
         val path = Path().apply {
-            moveTo(0f, tr)
-            quadraticBezierTo(0f, 0f, tr, 0f)
-            lineTo(w - tr, 0f)
-            quadraticBezierTo(w, 0f, w, tr)
-            lineTo(w, h - f)
-            // Bottom-right foot: leave the right edge and curve onto the page edge.
-            arcTo(Rect(w - f, h - f, w + f, h + f), 270f, -90f, false)
-            lineTo(f, h)
-            // Bottom-left foot, mirror image.
-            arcTo(Rect(-f, h - f, f, h + f), 0f, -90f, false)
+            moveTo(left, tr)
+            quadraticBezierTo(left, 0f, left + tr, 0f)
+            lineTo(right - tr, 0f)
+            quadraticBezierTo(right, 0f, right, tr)
+            lineTo(right, h - f)
+            // Right foot: from the body's edge out to the page edge.
+            arcTo(Rect(right - f, h - f, right + f, h + f), 270f, 90f, false)
+            lineTo(left - f, h)
+            // Left foot, mirrored.
+            arcTo(Rect(left - f, h - f, left + f, h + f), 180f, 90f, false)
             close()
         }
         return Outline.Generic(path)
     }
 }
+
+/** Width the feet claim on each side of the active tab. */
+private val FOOT = 12.dp
 
 /** Cheap perceived brightness, used only to pick the inactive chip's alpha. */
 private fun Color.perceivedBrightness(): Float = 0.299f * red + 0.587f * green + 0.114f * blue

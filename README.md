@@ -86,8 +86,8 @@ Up to ten documents can stay open, and the app refuses new tabs once the combine
 
 ## Current version
 
-- **Version:** 1.6.4
-- **Version code:** 11
+- **Version:** 1.6.5
+- **Version code:** 12
 - **Package:** `com.asoraksh.hermeseditor`
 
 ## Independent project notice
