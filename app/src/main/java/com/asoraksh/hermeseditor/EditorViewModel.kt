@@ -110,13 +110,36 @@ class EditorViewModel : ViewModel() {
         private set
 
     /**
-     * The active tab. Always valid: a share intent can arrive before any restore
-     * ran, and the editor must never render "no document".
+     * Whether the Recent page is the visible page. Independent of [tabs]: the
+     * home tab can be shown while documents stay open behind it, which is what
+     * makes the app icon a way back to the list instead of a "close everything".
+     */
+    var home: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * The active tab. Detached when nothing is open: the Recent page can be on
+     * screen with an empty tab list, and a reader of this property must not be
+     * able to bring a document back to life by touching it.
      */
     val activeTab: TabState
         get() = _tabs.firstOrNull { it.id == activeTabId }
             ?: _tabs.firstOrNull()
-            ?: TabState(TAB_1).also { _tabs.add(it); activeTabId = it.id }
+            ?: TabState(TAB_1)
+
+    /** Show the Recent page without touching the open documents. */
+    fun goHome() {
+        if (_tabs.isNotEmpty()) scheduleFlush(activeTab)
+        home = true
+        bumpSession()
+    }
+
+    /** Leave the Recent page; the caller has already opened or created a tab. */
+    private fun leaveHome() {
+        if (!home) return
+        home = false
+        bumpSession()
+    }
 
     // --- v1.5-compatible surface, delegated to the active tab -------------
 
@@ -216,6 +239,7 @@ class EditorViewModel : ViewModel() {
     /** Returns false when the tab limit or the text budget refuses a new tab. */
     fun newTab(markdown: Boolean): Boolean {
         if (!canOpenAnotherTab()) return false
+        home = false
         val tab = TabState(nextId())
         tab.title = if (markdown) UNTOOLED_MD else UNTOOLED_TXT
         tab.hydrated = true
@@ -236,6 +260,9 @@ class EditorViewModel : ViewModel() {
      * after a save or a close.
      */
     fun switchTab(id: String): Boolean {
+        // Tapping the tab that is already active still has to leave the Recent
+        // page, otherwise the first tap after the icon does nothing.
+        leaveHome()
         if (id == activeTabId) return true
         val target = _tabs.firstOrNull { it.id == id } ?: return false
         scheduleFlush(activeTab)
@@ -258,11 +285,10 @@ class EditorViewModel : ViewModel() {
         retireDraft(closing)
         _tabs.removeAt(index)
         if (_tabs.isEmpty()) {
-            val fresh = TabState(nextId())
-            fresh.hydrated = true
-            fresh.fresh = true
-            _tabs.add(fresh)
-            activeTabId = fresh.id
+            // Closing the last document lands on the Recent tab instead of
+            // spawning a blank document the user never asked for.
+            activeTabId = ""
+            home = true
         } else if (activeTabId == id) {
             val next = _tabs[index.coerceAtMost(_tabs.lastIndex)]
             activeTabId = next.id
@@ -312,7 +338,9 @@ class EditorViewModel : ViewModel() {
 
     fun persistManifest(sync: Boolean = false) {
         val s = store ?: return
-        if (_tabs.isEmpty()) return
+        // Nothing open: drop the manifest rather than leave the closed tabs on
+        // disk to be reopened on the next launch.
+        if (_tabs.isEmpty()) { s.clearManifest(); return }
         s.saveManifest(TabManifest(records(), activeTabId), sync)
     }
 
@@ -374,6 +402,14 @@ class EditorViewModel : ViewModel() {
         restored = true
 
         val manifest = store?.loadManifest()
+        // Nothing remembered and no legacy recovery file: there is no document
+        // to reopen, so the session starts on the Recent tab instead of inventing
+        // an empty one.
+        if (manifest == null && legacyDraft.isNullOrEmpty() && lastUri == null) {
+            store?.clearLegacyDocument()
+            home = true
+            return
+        }
         val records: List<TabRecord> = manifest?.tabs ?: listOf(
             TabManifestCodec.migrate(
                 legacyUri = lastUri?.toString(),
@@ -394,7 +430,11 @@ class EditorViewModel : ViewModel() {
             tab.scrollY = record.scrollY
             _tabs.add(tab)
         }
-        if (_tabs.isEmpty()) _tabs.add(TabState(TAB_1))
+        if (_tabs.isEmpty()) {
+            restored = true
+            home = true
+            return
+        }
         activeTabId = manifest?.activeTabId?.takeIf { id -> _tabs.any { it.id == id } } ?: _tabs.first().id
 
         // v1.5 kept unsaved text in ONE recovery file (filesDir/draft.txt) and
@@ -525,6 +565,7 @@ class EditorViewModel : ViewModel() {
         scheduleFlush(activeTab)
         _tabs.add(tab)
         activeTabId = tab.id
+        home = false
         setDocument(tab.id, uri, newTitle, text)
         return tab.id
     }

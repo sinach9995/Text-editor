@@ -116,4 +116,8 @@
     <string name="onboarding_replay">نمایش دوباره راهنمای شروع</string>
     <string name="font_size">اندازهٔ متن</string>
     <string name="tab_limit_reached">اول یک زبانه را ببندید؛ حداکثر ۱۰ سند می‌تواند باز بماند</string>
+    <string name="recent_tab">اخیر</string>
+    <string name="more_menu">بیشتر</string>
+    <string name="recent_hint">فایل‌هایی که در ویرایشگر باز می‌کنید اینجا فهرست می‌شوند، تازه‌ترین اول.</string>
+    <string name="recent_open_now">باز است</string>
 </resources>

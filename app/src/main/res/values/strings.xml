@@ -116,4 +116,8 @@
     <string name="onboarding_replay">Show introductory tips again</string>
     <string name="font_size">Font size</string>
     <string name="tab_limit_reached">Close a tab first: up to 10 documents can stay open</string>
+    <string name="recent_tab">Recent</string>
+    <string name="more_menu">More</string>
+    <string name="recent_hint">Files you open in the editor are listed here, newest first.</string>
+    <string name="recent_open_now">Open</string>
 </resources>
