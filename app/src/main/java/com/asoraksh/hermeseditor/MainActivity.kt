@@ -843,23 +843,6 @@ class MainActivity : ComponentActivity() {
                         onHome = { vm.goHome(); focusManager.clearFocus() },
                     )
                 },
-                bottomBar = {
-                    // Hidden in landscape while typing: New/Open/Save would sit on
-                    // top of the text line the user is editing.
-                    if (!compactChrome) Column(Modifier.navigationBarsPadding().imePadding()) {
-                    ActionBar(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        onNew = { newFile(false) },
-                        onNewMarkdown = { newFile(true) },
-                        onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
-                        onQuickSave = { vm.documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
-                        onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
-                        onExport = { exportDocument.launch(baseName(title) + ".txt") }
-                    )
-                    }
-                },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
                 Box(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding).onSizeChanged { viewportHeight = it.height }) {
@@ -900,7 +883,11 @@ class MainActivity : ComponentActivity() {
                         }
                     ) {
                     Box(Modifier.fillMaxSize().clipToBounds().documentPinchZoom(zoomDocument, startPinch, endPinch)
-                        .verticalScroll(editorScroll).padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 24.dp)) {
+                        .verticalScroll(editorScroll).padding(horizontal = 20.dp)
+                        // Room for the corner column: without it the last lines of a
+                        // document sit under the buttons, and the place you finish
+                        // writing is the place you cannot read.
+                        .padding(top = 20.dp, bottom = if (imeBottom == 0) 120.dp else 24.dp)) {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
@@ -963,11 +950,26 @@ class MainActivity : ComponentActivity() {
                     }
                     }
                 }
+                // The actions live in the corner, so nothing takes a full-width
+                // strip from the text. They are hidden behind Find and Markdown
+                // preview, where they would either cover the document or do
+                // nothing useful.
                 if (!finding && !mdPreview) {
-                    Box(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 4.dp)) {
-                        FloatingHistory(historyTick >= 0 && history.canUndo, historyTick >= 0 && history.canRedo,
-                            { vm.undo() }, { vm.redo() })
-                    }
+                    FloatingActions(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 10.dp),
+                        inRow = compactChrome,
+                        showDocuments = imeBottom == 0,
+                        canUndo = historyTick >= 0 && history.canUndo,
+                        canRedo = historyTick >= 0 && history.canRedo,
+                        onSave = { vm.documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
+                        onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
+                        onExport = { exportDocument.launch(baseName(title) + ".txt") },
+                        onNew = { newFile(false) },
+                        onNewMarkdown = { newFile(true) },
+                        onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
+                        undo = { vm.undo() },
+                        redo = { vm.redo() },
+                    )
                 }
                 Box(Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp, vertical = 8.dp)) {
                     if (finding) FloatingFind(query, { query = it; matchIndex = 0 }, matches.size,
@@ -1347,54 +1349,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun CombinedActionLabel(word: String) {
-        // Center the label and arrow as a single compact group.  Keeping only
-        // the word centered made the arrows look detached on a narrow phone.
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(word, maxLines = 1)
-                Spacer(Modifier.width(3.dp))
-                Text("▲", fontSize = 11.sp, modifier = Modifier.offset(y = (-1).dp))
-            }
-        }
-    }
-
-    @Composable private fun ActionBar(modifier: Modifier, onNew: () -> Unit, onNewMarkdown: () -> Unit, onOpen: () -> Unit, onQuickSave: () -> Unit, onSaveAs: () -> Unit, onExport: () -> Unit) {
-        var showSaveMenu by remember { mutableStateOf(false) }
-        var showNewMenu by remember { mutableStateOf(false) }
-        Surface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-            Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.weight(1f).height(52.dp)) {
-                    Surface(shape = ButtonDefaults.shape, color = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.primary,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClick = onNew, onLongClick = { showNewMenu = true })) {
-                        CombinedActionLabel(stringResource(R.string.ui_new))
-                    }
-                    DropdownMenu(expanded = showNewMenu, onDismissRequest = { showNewMenu = false }) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.new_txt)) }, onClick = { showNewMenu = false; onNew() })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.new_md)) }, onClick = { showNewMenu = false; onNewMarkdown() })
-                    }
-                }
-                Button(onClick = onOpen, modifier = Modifier.weight(1f).height(52.dp)) { Text(stringResource(R.string.ui_open)) }
-                Box(Modifier.weight(1f).height(52.dp)) {
-                    val btnColors = ButtonDefaults.buttonColors()
-                    Surface(
-                        shape = ButtonDefaults.shape,
-                        color = btnColors.containerColor,
-                        contentColor = btnColors.contentColor,
-                        modifier = Modifier.fillMaxSize().combinedClickable(role = Role.Button, onClickLabel = stringResource(R.string.ui_save), onClick = onQuickSave, onLongClick = { showSaveMenu = true })
-                    ) {
-                        CombinedActionLabel(stringResource(R.string.ui_save))
-                    }
-                    DropdownMenu(expanded = showSaveMenu, onDismissRequest = { showSaveMenu = false }) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.ui_save_as)) }, onClick = { showSaveMenu = false; onSaveAs() })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.ui_export_txt)) }, onClick = { showSaveMenu = false; onExport() })
-                    }
-                }
-            }
-        }
-    }
 }
 
 /**
