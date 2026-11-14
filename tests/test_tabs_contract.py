@@ -184,7 +184,8 @@ check("the stack is vertical unless the landscape keyboard is up",
       "inRow = compactChrome" in MAIN and "if (inRow) Row(" in CONTROLS and "else Column(" in CONTROLS)
 check("a keyboard open in portrait hides New and Open",
       "showDocuments = imeBottom == 0" in MAIN and "if (showDocuments) {" in CONTROLS)
-check("the buttons are 40dp dots, not a bar", "size(40.dp)" in CONTROLS and "CircleShape" in CONTROLS)
+check("the buttons are 46dp dots, not a bar", "private val DOT = 46.dp" in CONTROLS and "CircleShape" in CONTROLS)
+check("the five glyphs scale with the dot", "private val GLYPH = 25.dp" in CONTROLS and "size(GLYPH)" in CONTROLS)
 check("New, Open and Save are line icons",
       all(k in CONTROLS for k in ("LineIconKind.NewFile", "LineIconKind.OpenFolder", "LineIconKind.Save"))
       and "Stroke(" in CONTROLS)

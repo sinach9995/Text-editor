@@ -71,6 +71,12 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
  * the column over the cursor. In landscape with the keyboard up there is no
  * vertical room left at all, so the three that remain lie down in a row.
  */
+// The dots are 15% larger than the first cut: at 40dp with a 22dp glyph the
+// column read as decoration rather than buttons on a tall phone.
+private val DOT = 46.dp
+private val GLYPH = 25.dp
+private val HISTORY_GLYPH = 23.dp
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun FloatingActions(
     modifier: Modifier = Modifier,
@@ -89,12 +95,12 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
 ) {
     var saveMenu by remember { mutableStateOf(false) }
     var newMenu by remember { mutableStateOf(false) }
-    val gap = if (inRow) 10.dp else 8.dp
+    val gap = if (inRow) 11.dp else 9.dp
     // One list of buttons, laid out either as a column or as a row.
     val stack: @Composable () -> Unit = {
         Box {
             ActionDot(label = stringResource(R.string.ui_save), onClick = onSave, onLongClick = { saveMenu = true }) {
-                LineIcon(LineIconKind.Save, MaterialTheme.colorScheme.primary, Modifier.size(22.dp))
+                LineIcon(LineIconKind.Save, MaterialTheme.colorScheme.primary, Modifier.size(GLYPH))
             }
             // Save as / Export stay on a long press rather than taking two more
             // slots: the common action is one tap on a document you already own.
@@ -106,7 +112,7 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
         if (showDocuments) {
             Box {
                 ActionDot(label = stringResource(R.string.ui_new), onClick = onNew, onLongClick = { newMenu = true }) {
-                    LineIcon(LineIconKind.NewFile, MaterialTheme.colorScheme.primary, Modifier.size(22.dp))
+                    LineIcon(LineIconKind.NewFile, MaterialTheme.colorScheme.primary, Modifier.size(GLYPH))
                 }
                 DropdownMenu(newMenu, onDismissRequest = { newMenu = false }) {
                     DropdownMenuItem({ Text(stringResource(R.string.new_txt)) }, onClick = { newMenu = false; onNew() })
@@ -114,14 +120,14 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
                 }
             }
             ActionDot(label = stringResource(R.string.ui_open), onClick = onOpen) {
-                LineIcon(LineIconKind.OpenFolder, MaterialTheme.colorScheme.primary, Modifier.size(22.dp))
+                LineIcon(LineIconKind.OpenFolder, MaterialTheme.colorScheme.primary, Modifier.size(GLYPH))
             }
         }
         ActionDot(label = stringResource(R.string.undo), enabled = canUndo, onClick = undo) {
-            Icon(remember { vector(ControlIcon.Undo) }, null, Modifier.size(20.dp), tint = tintFor(canUndo))
+            Icon(remember { vector(ControlIcon.Undo) }, null, Modifier.size(HISTORY_GLYPH), tint = tintFor(canUndo))
         }
         ActionDot(label = stringResource(R.string.redo), enabled = canRedo, onClick = redo) {
-            Icon(remember { vector(ControlIcon.Redo) }, null, Modifier.size(20.dp), tint = tintFor(canRedo))
+            Icon(remember { vector(ControlIcon.Redo) }, null, Modifier.size(HISTORY_GLYPH), tint = tintFor(canRedo))
         }
     }
     // Order is deliberate: Save at the top of the stack and Redo at the bottom,
@@ -149,7 +155,7 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(DOT)
                 .combinedClickable(enabled = enabled, onLongClick = onLongClick, onClick = onClick)
                 .semantics { contentDescription = label },
             contentAlignment = Alignment.Center,
@@ -179,12 +185,14 @@ internal enum class LineIconKind { NewFile, OpenFolder, Save }
             drawPath(path, tint, style = stroke)
         }
         when (kind) {
-            // Page with a folded corner, plus a plus at its foot.
+            // A whole page with a folded corner and a plus inside it. The
+            // earlier cut notched the page's foot to fit the plus outside, and
+            // at real size that gap read as a broken rectangle.
             LineIconKind.NewFile -> {
-                poly(13f, 3f, 5f, 3f, 5f, 21f, 13f, 21f, 13f, 9f, 13f, 3f)
-                poly(13f, 3f, 17f, 7f, 13f, 7f)
-                drawLine(tint, o(17.5f, 13.5f), o(17.5f, 20.5f), w, StrokeCap.Round)
-                drawLine(tint, o(14f, 17f), o(21f, 17f), w, StrokeCap.Round)
+                poly(4f, 3f, 15f, 3f, 20f, 8f, 20f, 21f, 4f, 21f, 4f, 3f)
+                poly(15f, 3f, 15f, 8f, 20f, 8f)
+                drawLine(tint, o(12f, 9.5f), o(12f, 17.5f), w, StrokeCap.Round)
+                drawLine(tint, o(8f, 13.5f), o(16f, 13.5f), w, StrokeCap.Round)
             }
             // Folder with an open lid.
             LineIconKind.OpenFolder -> {
