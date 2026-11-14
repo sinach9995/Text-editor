@@ -27,7 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
@@ -204,12 +203,13 @@ private fun ScrollingTitle(title: String, color: Color, active: Boolean) {
 
 /**
  * The active tab's outline: rounded on top, and flared at the bottom by two
- * concave quarter-circles, so the tab is 2 x [FOOT] wider at the page edge than
- * in its body and its sides splay onto the text below.
+ * S-curves, so the tab is 2 x [FOOT] wider at the page edge than in its body
+ * and its sides splay onto the text below.
  *
- * The feet are concave: each arc's centre lies outside the tab, so the corner is
- * carved away and only a tapering sliver of the tab reaches the page edge. A
- * convex version looked like a bump glued to the corner.
+ * Each foot leaves its side vertically and lands on the page horizontally, with
+ * an inflection between the two: the tab grows out of the bar and melts into
+ * the page. Straight sides, a bump and a bare chamfer have all been tried here
+ * and each of them read as a mistake on a device.
  *
  * It is a per-tab shape, so the feet travel with the tab while the strip scrolls.
  */
@@ -222,28 +222,45 @@ private class MergedTabShape(
         val f = with(density) { FOOT.toPx() }.coerceAtMost(size.width / 4f)
         val left = f
         val right = size.width - f
+        // Keep the drop inside the tab so a short chip cannot invert the side.
+        val drop = with(density) { FOOT_DROP.toPx() }.coerceAtMost(h - tr - 1f)
         val path = Path().apply {
             moveTo(left, tr)
             quadraticBezierTo(left, 0f, left + tr, 0f)
             lineTo(right - tr, 0f)
             quadraticBezierTo(right, 0f, right, tr)
-            lineTo(right, h - f)
-            // Right foot: a concave quarter circle. Its centre sits outside the
-            // tab, above the page edge, so the material under the corner is
-            // carved away and the foot tapers onto the page instead of ending
-            // in a bump.
-            arcTo(Rect(right, h - 2f, right + 2f, h), 180f, -90f, false)
+            // The foot: an S-curve that leaves the side vertically, sweeps
+            // outwards and lands flat on the page edge. Both tangents are
+            // matched, so the join has no corner at either end; a plain quarter
+            // circle of this size reads as a straight 45-degree chamfer instead
+            // of a curve, which is why the side now starts vertical and only
+            // turns once it is clear of the body.
+            lineTo(right, h - drop)
+            cubicTo(
+                right, h - drop * 0.30f,
+                right + f * 0.55f, h,
+                right + f, h,
+            )
             lineTo(left - f, h)
             // Left foot, mirrored.
-            arcTo(Rect(left - 2f, h - 2f, left, h), 90f, -90f, false)
+            cubicTo(
+                left - f * 0.55f, h,
+                left, h - drop * 0.30f,
+                left, h - drop,
+            )
             close()
         }
         return Outline.Generic(path)
     }
 }
 
-/** Width the feet claim on each side of the active tab. */
+/**
+ * Width the feet claim on each side of the active tab, and how far up the side
+ * the curve begins. The drop is the taller number so the foot sweeps out
+ * shallowly instead of cutting the corner diagonally.
+ */
 private val FOOT = 12.dp
+private val FOOT_DROP = 16.dp
 
 /** Cheap perceived brightness, used only to pick the inactive chip's alpha. */
 private fun Color.perceivedBrightness(): Float = 0.299f * red + 0.587f * green + 0.114f * blue
