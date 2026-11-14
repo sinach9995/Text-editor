@@ -28,7 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,6 +49,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
@@ -802,7 +802,6 @@ class MainActivity : ComponentActivity() {
                 topBar = {
                     Column {
                     TopBar(
-                        title = title,
                         theme = selectedTheme,
                         setTheme = { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() },
                         lang = lang,
@@ -1043,16 +1042,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun TopBar(title: String, theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false, fontSize: Float = 17f, onFontSize: (Float) -> Unit = {}) {
+    @Composable private fun TopBar(theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit, onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit, onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit, compact: Boolean = false, fontSize: Float = 17f, onFontSize: (Float) -> Unit = {}) {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = if (compact) 0.dp else 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(if (compact) 44.dp else 72.dp).padding(horizontal = if (compact) 12.dp else 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            // The icon and the app name are decoration; the document title is not.
+        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = if (compact) 0.dp else 2.dp) { Row(Modifier.fillMaxWidth().statusBarsPadding().height(if (compact) 44.dp else 58.dp).padding(horizontal = if (compact) 12.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The open document is named by its tab, one row below: repeating it
+            // here in the biggest type on screen named the same file twice.
             if (!compact) {
-                Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
-                Spacer(Modifier.width(12.dp))
+                Image(painter = painterResource(id = R.drawable.hermes_editor_icon), contentDescription = "Hermes Text Editor icon", modifier = Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)))
+                Spacer(Modifier.width(10.dp))
             }
-            Column(Modifier.weight(1f)) { if (!compact) Text("Hermes Text Editor", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(title, maxLines = 1, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState()), color = MaterialTheme.colorScheme.onSurface, fontSize = if (compact) 14.sp else 19.sp, fontWeight = FontWeight.SemiBold) }
+            Text(
+                "Hermes Text Editor",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = if (compact) 15.sp else 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Box { IconButton(onClick = { expanded = true }, modifier = Modifier.size(if (compact) 36.dp else 40.dp)) { Text("⋮", fontSize = if (compact) 22.sp else 30.sp) }; DropdownMenu(expanded, { expanded = false }) {
                 DropdownMenuItem(
                     text = { Text(stringResource(if (theme == AppTheme.DARK) R.string.theme_to_light else R.string.theme_to_dark)) },

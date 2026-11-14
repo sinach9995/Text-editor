@@ -51,8 +51,14 @@ topbar_call = body(MAIN, "Column {\n                    TopBar(")
 
 # --- Tab strip ------------------------------------------------------------
 check("TabStrip exists", bool(STRIP))
-check("strip is 38dp tall", "height(38.dp)" in STRIP)
-check("strip shows an unsaved dot", "if (dirty)" in STRIP and "5.dp" in STRIP)
+check("strip is 54dp tall with 42dp tabs", "height(54.dp)" in STRIP and "42.dp" in STRIP)
+check("strip shows an unsaved dot", "if (dirty)" in STRIP and "size(6.dp)" in STRIP)
+check("the active tab is cut out of the page, not floating on it",
+      "pageColor" in STRIP and "RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)" in STRIP)
+check("a title wider than the tab can be dragged sideways",
+      "horizontalScroll(scroll)" in STRIP and "didOverflowWidth" in STRIP)
+check("the top bar no longer repeats the active tab's name",
+      "fun TopBar(theme: AppTheme" in MAIN and '"Hermes Text Editor",' in MAIN)
 check("strip closes with a dedicated hit target", "\"×\"" in STRIP and "onClose" in STRIP)
 check("strip scrolls and follows the active tab", "LazyRow" in STRIP and "animateScrollToItem(activeIndex)" in STRIP)
 check("strip is rendered under TopBar", "TabStrip(" in topbar_call)
@@ -104,8 +110,8 @@ for key in ("font_size", "tab_limit_reached"):
           f'name="{key}"' in STRINGS_EN and f'name="{key}"' in STRINGS_FA)
 
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.6.2", 'versionName = "1.6.2"' in GRADLE)
-check("versionCode was bumped past 1.6.1", "versionCode = 9" in GRADLE)
+check("versionName is 1.6.3", 'versionName = "1.6.3"' in GRADLE)
+check("versionCode was bumped past 1.6.2", "versionCode = 10" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover the codec and the reader",
