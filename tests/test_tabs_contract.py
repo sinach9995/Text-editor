@@ -115,9 +115,43 @@ for key in ("font_size", "tab_limit_reached"):
     check(f"string {key} exists in both locales",
           f'name="{key}"' in STRINGS_EN and f'name="{key}"' in STRINGS_FA)
 
+# --- Help text ------------------------------------------------------------
+import re as _re
+
+
+def _help(text, name):
+    block = _re.search(r'<string-array name="%s">(.*?)</string-array>' % name, text, _re.S).group(1)
+    return _re.findall(r"<item>(.*?)</item>", block, _re.S)
+
+
+for name in ("help_titles", "help_bodies"):
+    en, fa = _help(STRINGS_EN, name), _help(STRINGS_FA, name)
+    check(f"{name} has the same number of items in both locales", len(en) == len(fa))
+    check(f"{name} is not empty", len(en) > 0)
+
+titles_en, titles_fa = _help(STRINGS_EN, "help_titles"), _help(STRINGS_FA, "help_titles")
+check("help documents the tab strip", "Tabs" in titles_en and "تب‌ها" in titles_fa)
+check("help documents the session coming back",
+      "Reopening the app" in titles_en and "بازگشت به برنامه" in titles_fa)
+check("the tab topic describes the welded foot in both locales",
+      any("welded to the page" in b for b in _help(STRINGS_EN, "help_bodies"))
+      and any("پای قوسی" in b for b in _help(STRINGS_FA, "help_bodies")))
+
+# An unescaped apostrophe is a resource-compile failure, not a warning, and it
+# only shows up in CI because there is no SDK here to run aapt.
+for _name in ("help_titles", "help_bodies"):
+    for _loc, _text in (("en", STRINGS_EN), ("fa", STRINGS_FA)):
+        check(f"{_name} has no unescaped apostrophes ({_loc})",
+              all("'" not in _item for _item in _help(_text, _name)))
+
+# About must read the installed version, not a literal that drifts.
+check("About shows the installed version",
+      "getPackageInfo(packageName, 0).versionName" in MAIN
+      and "stringResource(R.string.about_body, version)" in MAIN)
+
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.6.7", 'versionName = "1.6.7"' in GRADLE)
-check("versionCode was bumped past 1.6.2", "versionCode = 14" in GRADLE)
+check("versionName is 1.6.8", 'versionName = "1.6.8"' in GRADLE)
+check("versionCode was bumped past 1.6.2", "versionCode = 15" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover the codec and the reader",

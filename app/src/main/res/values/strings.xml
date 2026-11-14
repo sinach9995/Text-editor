@@ -44,6 +44,8 @@
         <item>Create a Markdown file</item>
         <item>Open a file</item>
         <item>Open from your file manager</item>
+        <item>Tabs</item>
+        <item>Reopening the app</item>
         <item>Editing</item>
         <item>Live Markdown styling</item>
         <item>Preview and Edit Markdown</item>
@@ -62,8 +64,10 @@
     <string-array name="help_bodies">
         <item>Tap New ▲ to start untitled.txt. If text exists, confirm before replacing it. Your saved file is not deleted.</item>
         <item>Hold New ▲ and choose New Markdown file (.md). A blank untitled.md opens in source editing mode, ready to write.</item>
-        <item>Tap Open and choose a .txt, .md, or .markdown file through Android’s file picker.</item>
+        <item>Tap Open and choose a .txt, .md, or .markdown file through Android’s file picker. It opens in its own tab and leaves your other tabs untouched.</item>
         <item>Choose a supported text file in your Android file manager and open it with Hermes Text Editor.</item>
+        <item>Every document lives in its own tab under the title bar. The open tab is welded to the page beneath it by a curved foot, so you can tell at a glance which page you are editing. Tap a tab to switch, tap × on it to close. Drag a long tab name sideways to read the rest of it; the row scrolls sideways when the tabs no longer fit.</item>
+        <item>Your tabs, the active one and its scroll position come back when you return to the app, including after Android has closed it in the background. Unsaved text stays in the draft of that tab.</item>
         <item>Tap to place the cursor, type, select, copy and paste. Long filenames stay on one line; swipe the name sideways to read it.</item>
         <item>In Edit Markdown, headings, emphasis, links, lists, quotes and code are styled as you type. All Markdown symbols remain visible and editable; source text is preserved.</item>
         <item>Use the three-dot menu to switch modes. Preview is formatted for reading; Edit Markdown shows the original source. Switching keeps approximately the same document section. Tap a web link in Preview to open your browser.</item>
