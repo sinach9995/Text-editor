@@ -127,18 +127,27 @@ class EditorViewModel : ViewModel() {
             ?: _tabs.firstOrNull()
             ?: TabState(TAB_1)
 
-    /** Show the Recent page without touching the open documents. */
+    /**
+     * Show the Recent page without touching the open documents.
+     *
+     * No session bump: a bump tells the editor this is a new document session,
+     * which drops its find state and anchors and takes a pending scroll target,
+     * so coming back from Recent landed at a position the model had discarded.
+     * The page is an overlay, not a document change.
+     */
     fun goHome() {
         if (_tabs.isNotEmpty()) scheduleFlush(activeTab)
         home = true
-        bumpSession()
+    }
+
+    /** Leave the Recent page without changing which document is open. */
+    fun showDocument() {
+        home = false
     }
 
     /** Leave the Recent page; the caller has already opened or created a tab. */
     private fun leaveHome() {
-        if (!home) return
         home = false
-        bumpSession()
     }
 
     // --- v1.5-compatible surface, delegated to the active tab -------------
@@ -275,8 +284,8 @@ class EditorViewModel : ViewModel() {
 
     /**
      * Removes a tab. The caller has already confirmed the discard when it was
-     * dirty. Closing the last tab leaves one clean untitled tab behind, so the
-     * editor never has to render "no document".
+     * dirty. Closing the last tab lands on the Recent page with an empty strip:
+     * a state the UI renders, not one it has to work around.
      */
     fun closeTab(id: String): Boolean {
         val index = _tabs.indexOfFirst { it.id == id }
@@ -360,12 +369,12 @@ class EditorViewModel : ViewModel() {
      */
     private fun readDraft(tab: TabState): String? {
         draftFile(tab)?.takeIf { it.exists() }?.let { file ->
-            runCatching { BoundedReader.readText(file) }.getOrNull()?.let { return it }
+            runCatching { BoundedReader.readText(file, DRAFT_MAX_BYTES) }.getOrNull()?.let { return it }
         }
         val legacyFile = legacyDraftFile
         val carried = pendingLegacyText ?: legacyFile
             ?.takeIf { it.exists() }
-            ?.let { file -> runCatching { BoundedReader.readText(file) }.getOrNull() }
+            ?.let { file -> runCatching { BoundedReader.readText(file, DRAFT_MAX_BYTES) }.getOrNull() }
         if (carried != null) {
             writeDraft(tab, carried, tab.draftEpoch)
             if (legacyFile != null && legacyFile != draftFile(tab) && legacyFile.exists()) {
@@ -613,6 +622,10 @@ class EditorViewModel : ViewModel() {
     }
 
     fun onTextChanged(newValue: TextFieldValue, allowCoalescing: Boolean) {
+        // With no tab open, activeTab is a detached placeholder: recording an
+        // edit here wrote draft_tab_1.txt for a document nobody can see, and the
+        // next tab to take that id adopted the text.
+        if (_tabs.isEmpty()) return
         val tab = activeTab
         val changed = newValue.text != tab.editor.text
         tab.history.record(snapshotOf(tab), of(newValue), android.os.SystemClock.uptimeMillis(), allowCoalescing = allowCoalescing)
@@ -662,6 +675,7 @@ class EditorViewModel : ViewModel() {
             val file = draftFile(tab) ?: return
             if (epoch != tab.draftEpoch) return
             runCatching {
+                if (text.toByteArray(Charsets.UTF_8).size > DRAFT_MAX_BYTES) return
                 // Temp file + rename: a process kill mid-write must not truncate the draft.
                 val tmp = File(file.parentFile, file.name + ".tmp")
                 tmp.writeText(text, Charsets.UTF_8)
@@ -727,5 +741,15 @@ class EditorViewModel : ViewModel() {
         const val UNTOOLED_MD = "untitled.md"
         const val TAB_1 = "tab_1"
         private const val AUTOSAVE_DEBOUNCE_MS = 500L
+
+        /**
+         * The draft ceiling, used on both sides of the write.
+         *
+         * It used to be BoundedReader.MAX_BYTES on read and unbounded on write:
+         * text pasted past 5 MB was written, then refused on the next start, so
+         * the edits a draft exists to protect were the ones it dropped. Writing
+         * now refuses exactly what reading refuses.
+         */
+        private const val DRAFT_MAX_BYTES = 16 * 1024 * 1024
     }
 }

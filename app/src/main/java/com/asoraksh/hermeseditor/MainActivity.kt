@@ -134,8 +134,36 @@ class MainActivity : ComponentActivity() {
     private var recentFiles by mutableStateOf<List<RecentFile>>(emptyList())
 
     private fun rememberRecent(target: Uri, title: String) {
+        val before = recentFiles.map { it.uri }.toSet()
         RecentFiles.record(this, target.toString(), title)
         recentFiles = RecentFiles.load(this)
+        // An entry pushed off the end can never be tapped again, so its grant
+        // goes back now instead of leaking for the life of the process.
+        (before - recentFiles.map { it.uri }.toSet()).forEach { dropped ->
+            if (vm.tabs.none { it.uri?.toString() == dropped }) {
+                runCatching { releasePermission(Uri.parse(dropped)) }
+            }
+        }
+    }
+
+    /**
+     * The list the Recent page shows: documents open right now, then the history.
+     * A restored tab was never opened in this run, so without the first half it
+     * would be missing from the very list it belongs to.
+     */
+    private fun recentList(): List<RecentFile> {
+        val open = vm.tabs.mapNotNull { tab -> tab.uri?.let { RecentFile(it.toString(), tab.title) } }
+        val seen = open.map { it.uri }.toSet()
+        return open + recentFiles.filter { it.uri !in seen }
+    }
+
+    /** Long-press on a row: forget it, and hand its grant back if no tab holds it. */
+    private fun forgetRecent(file: RecentFile) {
+        RecentFiles.forget(this, file.uri)
+        recentFiles = RecentFiles.load(this)
+        if (vm.tabs.none { it.uri?.toString() == file.uri }) {
+            runCatching { releasePermission(Uri.parse(file.uri)) }
+        }
     }
 
     /**
@@ -143,7 +171,7 @@ class MainActivity : ComponentActivity() {
      * it. The Open dialog, the Recent tab and an incoming share all go through
      * here so all three agree on what "already open" means.
      */
-    private fun openUri(target: Uri) {
+    private fun openUri(target: Uri, fromRecent: Boolean = false) {
         takePersistablePermissions(target)
         // An already-open file is jumped to, never opened twice: two tabs on one
         // file would save over each other with stale text.
@@ -168,7 +196,12 @@ class MainActivity : ComponentActivity() {
                     notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
                 // Leave every buffer untouched; an empty tab here would be an
                 // empty tab the user never asked for.
-                text == null -> notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                text == null -> {
+                    notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                    // A row that cannot be read any more fails on every tap;
+                    // forget it instead of leaving a dead entry on the list.
+                    if (fromRecent) forgetRecent(RecentFile(target.toString(), displayName(target)))
+                }
                 vm.openInNewTab(target, displayName(target), text) == null ->
                     notifyMessage(getString(R.string.tab_limit_reached))
                 else -> rememberRecent(target, displayName(target))
@@ -184,7 +217,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         val uri = runCatching { Uri.parse(file.uri) }.getOrNull() ?: return
-        openUri(uri)
+        openUri(uri, fromRecent = true)
     }
 
     /**
@@ -718,26 +751,34 @@ class MainActivity : ComponentActivity() {
                 val uri = tab.uri
                 val sharedWithAnotherTab = uri != null && vm.tabs.count { it.id != id && it.uri == uri } > 0
                 vm.closeTab(id)
-                // Persistable grants are a limited resource (~128 per app); a
-                // closed tab must not keep one alive.
-                if (uri != null && !sharedWithAnotherTab) releasePermission(uri)
+                // Persistable grants are a limited resource (~128 per app), but a
+                // Recent row needs its grant to outlive the tab that opened it:
+                // releasing here made every row of that list fail to reopen.
+                // The budget still holds -- Recent keeps 12 entries at most, and
+                // an evicted entry gives its grant back (see rememberRecent).
+                if (uri != null && !sharedWithAnotherTab &&
+                    recentFiles.none { it.uri == uri.toString() }
+                ) releasePermission(uri)
             }
             if (tab.isDirty) { discardAction = action; showDiscardDialog = true } else action()
         }
         fun newFile(markdown: Boolean) {
-            val action: () -> Unit = {
-                val tab = vm.activeTab
-                // "New" on an untouched blank document reuses that tab instead of
-                // stacking empty ones; anything else gets a real new tab.
-                val untouched = tab.uri == null && tab.editor.text.isEmpty() && !tab.isDirty &&
-                    tab.title == (if (markdown) EditorViewModel.UNTOOLED_MD else EditorViewModel.UNTOOLED_TXT)
-                if (!untouched && !vm.newDocument(markdown)) {
-                    notifyMessage(getString(R.string.tab_limit_reached))
-                }
+            // With nothing open, activeTab is a detached placeholder and every
+            // field of it looks "untouched", so the reuse rule used to swallow
+            // the tap: New was a dead button on the Recent page.
+            val current = vm.tabs.firstOrNull { it.id == vm.activeTabId }
+            val untouched = current != null && current.uri == null && current.editor.text.isEmpty() &&
+                !current.isDirty &&
+                current.title == (if (markdown) EditorViewModel.UNTOOLED_MD else EditorViewModel.UNTOOLED_TXT)
+            if (untouched) {
+                // A blank document is already behind Recent: go back to it
+                // instead of stacking an identical tab.
+                vm.showDocument()
+                return
             }
             // No warning here: "New" adds a tab and leaves the current one
             // intact, so asking about discarding text was a lie.
-            action()
+            if (!vm.newDocument(markdown)) notifyMessage(getString(R.string.tab_limit_reached))
         }
         fun setLang(code: String) {
             if (code == lang) return
@@ -887,7 +928,17 @@ class MainActivity : ComponentActivity() {
                         // Room for the corner column: without it the last lines of a
                         // document sit under the buttons, and the place you finish
                         // writing is the place you cannot read.
-                        .padding(top = 20.dp, bottom = if (imeBottom == 0) 120.dp else 24.dp)) {
+                        .padding(
+                            top = 20.dp,
+                            bottom = when {
+                                imeBottom == 0 -> 120.dp
+                                // Landscape with the keyboard up turns the column into
+                                // a row along the bottom edge; 24dp left the last line
+                                // of text sitting under it.
+                                compactChrome -> 70.dp
+                                else -> 24.dp
+                            }
+                        )) {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
@@ -984,7 +1035,7 @@ class MainActivity : ComponentActivity() {
                 // document keeps its scroll, selection and text behind the list,
                 // so coming back from it costs nothing.
                 if (vm.home) RecentPage(
-                    files = recentFiles,
+                    files = recentList(),
                     openUris = vm.tabs.mapNotNull { it.uri?.toString() }.toSet(),
                     onNew = { newFile(false) },
                     onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
@@ -1086,25 +1137,28 @@ class MainActivity : ComponentActivity() {
                 // state any more.
                 Box(
                     modifier = Modifier.align(Alignment.CenterVertically)
-                        .graphicsLayer { scaleX = if (homeActive) 1.12f else 1f; scaleY = scaleX }
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(9.dp))
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
                         .then(
-                            if (homeActive) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+                            if (homeActive) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.30f))
                             else Modifier
                         )
                         .clickable(onClick = onHome),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.hermes_editor_icon),
                         contentDescription = homeLabel,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .size(if (homeActive) 34.dp else 30.dp)
+                            .clip(RoundedCornerShape(9.dp)),
                     )
                 }
                 Spacer(Modifier.width(6.dp))
                 TabStrip(
                     tabs = tabs,
                     activeId = activeTabId,
+                    homeActive = homeActive,
                     onSelect = onSelectTab,
                     onClose = onCloseTab,
                     modifier = Modifier.weight(1f),
@@ -1151,23 +1205,25 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The menu control: half a disc growing out of the right edge, so the corner
-     * of the band is the button instead of a 40dp square parked beside the tabs.
-     * Only the inner half is on screen; the other half is the off-canvas part of
-     * the circle, which is why the three dots sit against the edge.
+     * The menu control: one whole disc at the end of the band, three dots stacked
+     * vertically on it. The half-disc it replaced read as a tab, and the dots in
+     * a row read as a horizontal "more" affordance.
      */
     @Composable private fun CornerOverflow(expanded: Boolean, onOpen: () -> Unit, onDismiss: () -> Unit, menu: @Composable ColumnScope.() -> Unit) {
         val moreLabel = stringResource(R.string.more_menu)
         Box {
             Surface(
-                modifier = Modifier.width(24.dp).height(46.dp).clickable(onClick = onOpen).semantics { contentDescription = moreLabel },
-                shape = HalfDiscShape(),
+                modifier = Modifier.size(44.dp).clickable(onClick = onOpen).semantics { contentDescription = moreLabel },
+                shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
-                    Row(Modifier.padding(end = 5.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                         repeat(3) {
-                            Box(Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
+                            Box(Modifier.size(3.5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
                         }
                     }
                 }
@@ -1355,18 +1411,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-}
-
-/**
- * The corner control's outline: a circle whose centre sits on the right edge, so
- * only the left half is on screen and the button appears to grow out of the
- * corner. Clipping to it also means the visible hit area is the visible shape.
- */
-private class HalfDiscShape : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Generic(
-            Path().apply {
-                addOval(Rect(0f, 0f, size.width * 2f, size.height))
-            }
-        )
 }

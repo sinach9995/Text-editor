@@ -64,12 +64,15 @@ import androidx.compose.ui.unit.sp
 fun TabStrip(
     tabs: List<TabState>,
     activeId: String,
+    // While the Recent page is on screen no tab is the one you are looking at;
+    // without this the strip kept painting a tab as active behind the list.
+    homeActive: Boolean = false,
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val activeIndex = tabs.indexOfFirst { it.id == activeId }
+    val activeIndex = if (homeActive) -1 else tabs.indexOfFirst { it.id == activeId }
     // A newly created tab is appended off-screen; without this the strip would
     // look unchanged and the user would think New did nothing.
     LaunchedEffect(activeIndex, tabs.size) {
@@ -94,7 +97,7 @@ fun TabStrip(
                     TabChip(
                         title = tab.title,
                         dirty = tab.isDirty,
-                        active = tab.id == activeId,
+                        active = !homeActive && tab.id == activeId,
                         onSelect = { onSelect(tab.id) },
                         onClose = { onClose(tab.id) },
                     )

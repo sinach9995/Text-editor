@@ -75,9 +75,11 @@ check("the band starts with the app icon", "R.drawable.hermes_editor_icon" in he
 check("the band is one row of 52dp", "height(52.dp)" in header)
 check("the file name is no longer repeated above the tabs", "20.sp" not in header)
 check("tapping the icon goes home", "onHome" in header and ".clickable(onClick = onHome)" in header)
-check("the menu is half a disc in the corner",
-      "CornerOverflow(" in header and "HalfDiscShape" in MAIN
-      and "size.width * 2f" in MAIN)
+# 1.7: a whole disc with the dots stacked, not a half disc with a row of dots.
+check("the menu is a whole disc in the corner",
+      "CornerOverflow(" in header and "shape = CircleShape" in MAIN
+      and "HalfDiscShape" not in MAIN)
+check("the menu dots run vertically", "verticalArrangement = Arrangement.spacedBy(4.dp)" in MAIN)
 check("strip closes with a dedicated hit target", "\"×\"" in STRIP and "onClose" in STRIP)
 check("strip scrolls and follows the active tab", "LazyRow" in STRIP and "animateScrollToItem(activeIndex)" in STRIP)
 check("strip is rendered inside the header", "TabStrip(" in header)
@@ -87,11 +89,21 @@ check("strip is bound to the ViewModel, not duplicated state", "tabs = vm.tabs" 
 # covered the strip; the icon is the home affordance and carries the state.
 check("Recent is not a tab in the strip", "HomeTab" not in STRIP and "homeLabel" not in STRIP)
 check("the strip is only documents", "items(tabs, key = { it.id })" in STRIP and "tabs: List<TabState>," in STRIP)
-check("the active tab is the one the ViewModel points at", "active = tab.id == activeId" in STRIP)
-check("the icon marks the Recent state", "if (homeActive) 1.12f else 1f" in header
-      and "MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)" in header)
+check("the active tab is the one the ViewModel points at",
+      "active = !homeActive && tab.id == activeId" in STRIP)
+check("no tab looks active while Recent is on screen", "homeActive: Boolean = false," in STRIP)
+check("the icon marks the Recent state",
+      "if (homeActive) 34.dp else 30.dp" in header
+      and "MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)" in header)
 check("Recent paints over the document instead of letting the placeholder show",
       "MaterialTheme.colorScheme.background)" in RECENT)
+check("Recent swallows taps instead of falling through to the editor",
+      "detectTapGestures { }" in RECENT and "pointerInput(Unit)" in RECENT)
+check("Recent opens with the app name over the page name",
+      "R.string.recent_app_name" in RECENT
+      and RECENT.index("recent_app_name") < RECENT.index("R.string.recent_title"))
+check("a rule separates the title block from the list",
+      "HorizontalDivider(" in RECENT and "thickness = 1.dp" in RECENT)
 check("Recent has a heading and no hint sentence",
       "R.string.recent_title" in RECENT and "recent_hint" not in RECENT
       and "recent_hint" not in (ROOT / "app/src/main/res/values/strings.xml").read_text(encoding="utf-8"))
@@ -105,10 +117,21 @@ check("switching persists the new active id", "persistManifest()" in switch_tab)
 check("closing selects the adjacent tab", "index.coerceAtMost(_tabs.lastIndex)" in close_tab)
 check("every structural change persists the manifest",
       all("persistManifest()" in fn for fn in (new_tab, close_tab, switch_tab)))
-check("New reuses an untouched blank tab", "tab.uri == null && tab.editor.text.isEmpty() && !tab.isDirty" in new_ui)
+# The untouched-tab rule must look at a real tab: with nothing open, activeTab
+# is a detached placeholder that matched every field, so New did nothing at all
+# on the Recent page.
+check("New looks at a real tab, not the detached placeholder",
+      "vm.tabs.firstOrNull { it.id == vm.activeTabId }" in new_ui
+      and "current != null && current.uri == null" in new_ui)
+check("New reuses an untouched blank tab by going back to it",
+      "vm.showDocument()" in new_ui)
 check("New reports the tab limit", "R.string.tab_limit_reached" in new_ui)
 check("closing a dirty tab asks first", "if (tab.isDirty) { discardAction = action; showDiscardDialog = true }" in close_ui)
-check("closing a tab gives its SAF grant back", "releasePermission(uri)" in close_ui)
+# The grant has to outlive the tab when a Recent row still needs it; otherwise
+# every file on that list failed to reopen.
+check("a closed tab keeps the grant its Recent row needs",
+      "recentFiles.none { it.uri == uri.toString() }" in close_ui
+      and "releasePermission(uri)" in close_ui)
 
 # --- Per-tab chrome state -------------------------------------------------
 check("preview mode lives on the tab, not in rememberSaveable",
@@ -218,6 +241,27 @@ check("the Recent page covers the document instead of unmounting it",
       "if (vm.home) RecentPage(" in MAIN)
 check("tapping the corner menu in a document tab leaves Recent",
       "if (id == vm.activeTabId && !vm.home) return" in MAIN)
+
+
+# --- Recent page behaviour (1.7 review) -----------------------------------
+check("Recent lists open documents, not only history",
+      "private fun recentList()" in MAIN and "vm.tabs.mapNotNull { tab -> tab.uri?.let" in MAIN)
+check("a Recent row that cannot be read is forgotten",
+      "RecentFiles.forget(" in MAIN and "fromRecent" in MAIN)
+check("the page opens without resetting the editor session",
+      "bumpSession()" not in body(VM, "fun goHome("))
+check("leaving the page without a document change does not reset it either",
+      "bumpSession()" not in body(VM, "fun showDocument("))
+check("an edit with no tab open is ignored",
+      "if (_tabs.isEmpty()) return" in body(VM, "fun onTextChanged("))
+check("the draft ceiling is the same on read and write",
+      "DRAFT_MAX_BYTES" in body(VM, "private fun writeDraft(")
+      and "DRAFT_MAX_BYTES" in body(VM, "private fun readDraft("))
+check("landscape with a keyboard reserves room for the button row",
+      "compactChrome -> 70.dp" in MAIN)
+check("Recent headings exist in both languages",
+      'name="recent_app_name"' in STRINGS_EN and 'name="recent_app_name"' in STRINGS_FA
+      and 'name="recent_title">Recent<' in STRINGS_EN)
 
 # --- Version + CI ---------------------------------------------------------
 check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)

@@ -119,7 +119,8 @@
     <string name="font_size">اندازهٔ متن</string>
     <string name="tab_limit_reached">اول یک زبانه را ببندید؛ حداکثر ۱۰ سند می‌تواند باز بماند</string>
     <string name="recent_tab">اخیر</string>
-    <string name="recent_title">فایل‌های اخیر</string>
+    <string name="recent_app_name">Hermes Text Editor</string>
+    <string name="recent_title">اخیر</string>
     <string name="more_menu">بیشتر</string>
     <string name="recent_open_now">باز است</string>
 </resources>

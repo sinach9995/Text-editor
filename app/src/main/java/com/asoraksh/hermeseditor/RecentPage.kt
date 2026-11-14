@@ -3,6 +3,7 @@ package com.asoraksh.hermeseditor
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,12 +36,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The home tab: what the app shows when nothing is open, and what the app icon
- * returns to.
+ * The home page: what the app shows when nothing is open, and what the app icon
+ * returns to. It is a page behind the icon, not a tab in the strip, so the strip
+ * keeps showing the open documents while this is on screen.
  *
- * It is a page, not a menu: New and Open are the two ways a document can arrive,
- * and everything below them is this app's own history of what was opened, newest
- * first. Nothing here reaches outside the app to list files it has never seen.
+ * The heading is a title block -- the app name, then the page name -- with a rule
+ * across the page under it; only what is under the rule is this page's list. The
+ * first cut began with a bare button row flush against the top band, which read
+ * as a clipped page rather than a composed one.
+ *
+ * The list is every document open right now, then this app's own history of what
+ * it has opened, newest first. Nothing here reaches outside the app to list files
+ * it has never seen.
  */
 @Composable
 fun RecentPage(
@@ -50,32 +58,50 @@ fun RecentPage(
     onFile: (RecentFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Opaque on purpose: this page is drawn over a live document, and the
-    // first cut left the editor's own placeholder showing through the text.
     Column(
+        // Opaque on purpose: this page is drawn over a live document, and the
+        // first cut left the editor's own placeholder showing through the text.
         modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+            // Swallow touches: the page covers a real editor, and a tap that fell
+            // through moved the caret in a document nobody could see.
+            .pointerInput(Unit) { detectTapGestures { } },
     ) {
-        Text(
-            text = stringResource(R.string.recent_title),
-            color = MaterialTheme.colorScheme.onBackground,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            RecentAction(stringResource(R.string.ui_new), primary = true, onClick = onNew, modifier = Modifier.weight(1f))
-            RecentAction(stringResource(R.string.ui_open), primary = false, onClick = onOpen, modifier = Modifier.weight(1f))
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp)) {
+            Text(
+                text = stringResource(R.string.recent_app_name),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.recent_title),
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(16.dp))
         }
-        Spacer(Modifier.height(20.dp))
-        // No explanatory sentence: the heading says what the page is, and an
-        // empty list simply has nothing under the two buttons.
-        if (files.isNotEmpty()) {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(files, key = { it.uri }) { file ->
-                    RecentRow(file = file, open = file.uri in openUris, onClick = { onFile(file) })
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        HorizontalDivider(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+        )
+        Column(Modifier.weight(1f).padding(start = 20.dp, end = 20.dp, top = 18.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                RecentAction(stringResource(R.string.ui_new), primary = true, onClick = onNew, modifier = Modifier.weight(1f))
+                RecentAction(stringResource(R.string.ui_open), primary = false, onClick = onOpen, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(14.dp))
+            // No explanatory sentence: the heading says what the page is, and an
+            // empty list simply has nothing under the two buttons.
+            if (files.isNotEmpty()) {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(files, key = { it.uri }) { file ->
+                        RecentRow(file = file, open = file.uri in openUris, onClick = { onFile(file) })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                    }
                 }
             }
         }

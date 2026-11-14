@@ -80,7 +80,7 @@ check("restore persists the manifest it just built", "persistManifest()" in rest
 check("draft is read before the file", hydrate.find("draftFile(tab)") < hydrate.find("reader?.invoke(uri)"))
 check("a draft makes the tab dirty", "applyText(tab, draft, dirty = true)" in hydrate)
 check("a file read leaves the tab clean", "applyText(tab, text, dirty = false)" in hydrate)
-check("draft read is bounded", "BoundedReader.readText(file)" in body(VM, "private fun readDraft("))
+check("draft read is bounded", "BoundedReader.readText(file, DRAFT_MAX_BYTES)" in body(VM, "private fun readDraft("))
 check("file read is bounded", "runCatching { reader?.invoke(uri) }" in hydrate)
 check("a hydrate that lost its tab is dropped", "_tabs.contains(tab)" in hydrate)
 check("an unreadable uri degrades to untitled instead of crashing", "tab.title = UNTOOLED_TXT" in hydrate)

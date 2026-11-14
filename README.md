@@ -78,15 +78,19 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 ## The buttons
 
-The five document actions sit in a column in the bottom-right corner, as line icons rather than words in a bar: **Save** (floppy), **New** (page with a plus), **Open** (folder), **Undo** and **Redo**, in that order from the top down.
+The five document actions sit in a column in the bottom-right corner, as line icons rather than words in a bar: **Save** (floppy), **New** (page with a plus), **Open** (folder), **Undo** and **Redo**, in that order from the top down. Each one is a 46dp dot, so the target is bigger than the 40dp square it replaced.
 
 The column reacts to the keyboard. While it is open, New and Open are hidden and only Save, Undo and Redo remain. In landscape with the keyboard open the remaining three lie down in a row instead of a column, because there is no vertical room left.
 
-## The header and the Recent tab
+## The header and the Recent page
 
-The top of the screen is one band: the app icon, then the tabs, then a half disc in the right corner that opens the menu. There is no separate title bar any more, because it only repeated the name of the tab below it.
+The top of the screen is one band: the app icon, then the tabs, then a round menu button at the right end with the three dots stacked on it. There is no separate title bar any more, because it only repeated the name of the tab below it.
 
-Tapping the app icon returns to **Recent**, the tab pinned to the far left of the strip. Recent lists the files this app has opened, newest first, with New and Open at the top; tapping a file reopens it or jumps to the tab that already holds it. It cannot be closed, and it is what the app shows when no document is open — closing the last tab lands there instead of leaving a blank document behind.
+**Recent is a page behind the app icon, not a tab.** Tapping the icon opens it, and while it is open no tab in the strip is drawn as active -- the icon itself grows and takes a tinted plate, which is the only marker that you are not in a document. Tapping a tab, or New, leaves the page again.
+
+The page opens with the app name over the word **Recent** and a rule across the width under them; everything below the rule is the list. New and Open sit under the rule, and beneath them every document open right now followed by the files this app has opened, newest first. A restored tab is listed too: a document you have open is recent by definition.
+
+Grants matter here. A file opened from Recent is read through a permission this app was given when the file was first picked, so that permission is kept while a list entry still points at the file, and handed back when the entry is pushed off the end (the list keeps twelve) or the row turns out to be unreadable. Closing the last tab lands on Recent with an empty strip rather than leaving a blank document behind.
 
 ## Tabs
 
