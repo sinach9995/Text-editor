@@ -203,14 +203,13 @@ private fun ScrollingTitle(title: String, color: Color, active: Boolean) {
 }
 
 /**
- * The active tab's outline: rounded on top, and flared outwards at the bottom
- * by two convex quarter-circles, so the tab is 2 x [FOOT] wider at the page edge
- * than in its body. The sides therefore splay onto the page instead of meeting
- * it at a right angle, and the tab reads as standing on the text rather than
- * ending above it.
+ * The active tab's outline: rounded on top, and flared at the bottom by two
+ * concave quarter-circles, so the tab is 2 x [FOOT] wider at the page edge than
+ * in its body and its sides splay onto the text below.
  *
- * The feet are convex (they bulge away from the tab). An earlier version curved
- * them the other way, inwards, which looked like the tab was being pinched.
+ * The feet are concave: each arc's centre lies outside the tab, so the corner is
+ * carved away and only a tapering sliver of the tab reaches the page edge. A
+ * convex version looked like a bump glued to the corner.
  *
  * It is a per-tab shape, so the feet travel with the tab while the strip scrolls.
  */
@@ -229,11 +228,14 @@ private class MergedTabShape(
             lineTo(right - tr, 0f)
             quadraticBezierTo(right, 0f, right, tr)
             lineTo(right, h - f)
-            // Right foot: from the body's edge out to the page edge.
-            arcTo(Rect(right - f, h - f, right + f, h + f), 270f, 90f, false)
+            // Right foot: a concave quarter circle. Its centre sits outside the
+            // tab, above the page edge, so the material under the corner is
+            // carved away and the foot tapers onto the page instead of ending
+            // in a bump.
+            arcTo(Rect(right, h - 2f, right + 2f, h), 180f, -90f, false)
             lineTo(left - f, h)
             // Left foot, mirrored.
-            arcTo(Rect(left - f, h - f, left + f, h + f), 180f, 90f, false)
+            arcTo(Rect(left - 2f, h - 2f, left, h), 90f, -90f, false)
             close()
         }
         return Outline.Generic(path)

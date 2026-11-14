@@ -55,8 +55,9 @@ check("strip is 42dp tall, tabs fill it", "height(42.dp)" in STRIP and "var heig
 check("strip shows an unsaved dot", "if (dirty)" in STRIP and "size(6.dp)" in STRIP)
 check("the active tab is cut out of the page, not floating on it",
       "MergedTabShape()" in STRIP and "MaterialTheme.colorScheme.background" in STRIP)
-check("its feet flare outwards (convex) and travel with the tab",
-      "arcTo(" in STRIP and "270f, 90f" in STRIP and "180f, 90f" in STRIP
+check("its feet flare into the page with a concave quarter circle",
+      "arcTo(Rect(right, h - 2f, right + 2f, h), 180f, -90f, false)" in STRIP
+      and "arcTo(Rect(left - 2f, h - 2f, left, h), 90f, -90f, false)" in STRIP
       and "private class MergedTabShape" in STRIP)
 check("the strip starts flush under the top bar", "top = 12.dp" not in STRIP)
 check("a title wider than the tab can be dragged sideways",
@@ -114,8 +115,8 @@ for key in ("font_size", "tab_limit_reached"):
           f'name="{key}"' in STRINGS_EN and f'name="{key}"' in STRINGS_FA)
 
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.6.5", 'versionName = "1.6.5"' in GRADLE)
-check("versionCode was bumped past 1.6.2", "versionCode = 12" in GRADLE)
+check("versionName is 1.6.6", 'versionName = "1.6.6"' in GRADLE)
+check("versionCode was bumped past 1.6.2", "versionCode = 13" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover the codec and the reader",

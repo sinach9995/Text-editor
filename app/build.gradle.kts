@@ -12,8 +12,8 @@ android {
         applicationId = "com.asoraksh.hermeseditor"
         minSdk = 23
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.6.5"
+        versionCode = 13
+        versionName = "1.6.6"
     }
 
     signingConfigs {
