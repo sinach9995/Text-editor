@@ -50,21 +50,28 @@ fun RecentPage(
     onFile: (RecentFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 20.dp)) {
+    // Opaque on purpose: this page is drawn over a live document, and the
+    // first cut left the editor's own placeholder showing through the text.
+    Column(
+        modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.recent_title),
+            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             RecentAction(stringResource(R.string.ui_new), primary = true, onClick = onNew, modifier = Modifier.weight(1f))
             RecentAction(stringResource(R.string.ui_open), primary = false, onClick = onOpen, modifier = Modifier.weight(1f))
         }
         Spacer(Modifier.height(20.dp))
-        if (files.isEmpty()) {
-            Text(
-                text = stringResource(R.string.recent_hint),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp,
-                lineHeight = 21.sp,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        } else {
+        // No explanatory sentence: the heading says what the page is, and an
+        // empty list simply has nothing under the two buttons.
+        if (files.isNotEmpty()) {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(files, key = { it.uri }) { file ->
                     RecentRow(file = file, open = file.uri in openUris, onClick = { onFile(file) })

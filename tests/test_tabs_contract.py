@@ -83,12 +83,18 @@ check("strip scrolls and follows the active tab", "LazyRow" in STRIP and "animat
 check("strip is rendered inside the header", "TabStrip(" in header)
 check("the strip is never dropped for compact chrome", "compactChrome) TabStrip(" not in MAIN)
 check("strip is bound to the ViewModel, not duplicated state", "tabs = vm.tabs" in MAIN and "activeTabId = vm.activeTabId" in MAIN)
-check("the home tab is pinned outside the scrolling row",
-      "HomeTab(label = homeLabel, active = homeActive" in STRIP
-      and STRIP.index("HomeTab(label") < STRIP.index("LazyRow("))
-check("the home tab cannot be closed", "HomeTab(" in STRIP and "onClose" not in body(STRIP, "private fun HomeTab("))
-check("an open document tab is not marked active while home is showing",
-      "!homeActive && tab.id == activeId" in STRIP)
+# 1.7 revision: Recent is not a tab. It took a slot, and with a long name it
+# covered the strip; the icon is the home affordance and carries the state.
+check("Recent is not a tab in the strip", "HomeTab" not in STRIP and "homeLabel" not in STRIP)
+check("the strip is only documents", "items(tabs, key = { it.id })" in STRIP and "tabs: List<TabState>," in STRIP)
+check("the active tab is the one the ViewModel points at", "active = tab.id == activeId" in STRIP)
+check("the icon marks the Recent state", "if (homeActive) 1.12f else 1f" in header
+      and "MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)" in header)
+check("Recent paints over the document instead of letting the placeholder show",
+      "MaterialTheme.colorScheme.background)" in RECENT)
+check("Recent has a heading and no hint sentence",
+      "R.string.recent_title" in RECENT and "recent_hint" not in RECENT
+      and "recent_hint" not in (ROOT / "app/src/main/res/values/strings.xml").read_text(encoding="utf-8"))
 
 # --- Tab operations -------------------------------------------------------
 check("a new tab is refused past the cap", "if (!canOpenAnotherTab()) return false" in new_tab)

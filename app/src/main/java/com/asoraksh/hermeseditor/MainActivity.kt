@@ -1080,10 +1080,19 @@ class MainActivity : ComponentActivity() {
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(start = 10.dp), verticalAlignment = Alignment.Bottom) {
                 // A real target, not decoration: tapping the icon is the way back
-                // to the home tab, the same way a browser logo is a home button.
+                // to Recent, the same way a browser logo is a home button. While
+                // Recent is showing, the icon says so -- it grows a little and
+                // takes a tinted plate -- because there is no tab to carry that
+                // state any more.
                 Box(
-                    modifier = Modifier.align(Alignment.CenterVertically).size(32.dp)
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                        .graphicsLayer { scaleX = if (homeActive) 1.12f else 1f; scaleY = scaleX }
+                        .size(32.dp)
                         .clip(RoundedCornerShape(9.dp))
+                        .then(
+                            if (homeActive) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+                            else Modifier
+                        )
                         .clickable(onClick = onHome),
                 ) {
                     Image(
@@ -1098,9 +1107,6 @@ class MainActivity : ComponentActivity() {
                     activeId = activeTabId,
                     onSelect = onSelectTab,
                     onClose = onCloseTab,
-                    homeLabel = homeLabel,
-                    homeActive = homeActive,
-                    onHome = onHome,
                     modifier = Modifier.weight(1f),
                 )
                 CornerOverflow(expanded = expanded, onOpen = { expanded = true }, onDismiss = { expanded = false }) {

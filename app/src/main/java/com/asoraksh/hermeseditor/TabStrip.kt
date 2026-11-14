@@ -48,9 +48,9 @@ import androidx.compose.ui.unit.sp
  * The tab strip: a pinned home tab, then one tab per open document, directly
  * under the header.
  *
- * The home tab is not an overlay: it is a real tab, it is what the app shows
- * when nothing is open, and it cannot be closed. Keeping it inside the strip
- * means "which page am I on" is answered in one place instead of two.
+ * The home screen is not a tab. It used to be pinned at the head of the strip,
+ * which cost a slot and pushed the open documents aside; the app icon in the
+ * header is the way back to it instead, and the strip only ever holds documents.
  *
  * The active tab is a cut-out of the page, not a chip floating on the bar: it
  * takes the page colour, starts where the top bar ends, drops its bottom
@@ -66,9 +66,6 @@ fun TabStrip(
     activeId: String,
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
-    homeLabel: String,
-    homeActive: Boolean,
-    onHome: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -83,9 +80,6 @@ fun TabStrip(
     // parent that lays this composable out.
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.Bottom) {
-            // Pinned: the home tab must stay reachable however many documents
-            // are open, so it sits outside the scrolling row and keeps its slot.
-            HomeTab(label = homeLabel, active = homeActive, onClick = onHome)
             LazyRow(
                 modifier = Modifier.weight(1f).height(42.dp),
                 state = listState,
@@ -100,57 +94,12 @@ fun TabStrip(
                     TabChip(
                         title = tab.title,
                         dirty = tab.isDirty,
-                        active = !homeActive && tab.id == activeId,
+                        active = tab.id == activeId,
                         onSelect = { onSelect(tab.id) },
                         onClose = { onClose(tab.id) },
                     )
                 }
             }
-        }
-    }
-}
-
-/**
- * The home tab: no close button, because it is the empty state rather than a
- * document. It borrows the active tab's welded outline so the first tab on
- * screen is the same object whether it holds the home screen or a file.
- */
-@Composable
-private fun HomeTab(label: String, active: Boolean, onClick: () -> Unit) {
-    val background = if (active) MaterialTheme.colorScheme.background
-    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    val textColor = if (active) MaterialTheme.colorScheme.onBackground
-    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-    val height = if (active) 42.dp else 40.dp
-    val shape = if (active) MergedTabShape() else RoundedCornerShape(12.dp)
-    val inset = if (active) FOOT else 0.dp
-    Column(
-        modifier = Modifier
-            .height(height)
-            .clip(shape)
-            .background(background)
-            .clickable(onClick = onClick),
-    ) {
-        if (active) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = inset)
-                    .height(2.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
-        Row(
-            modifier = Modifier.weight(1f).padding(start = 12.dp + inset, end = 12.dp + inset),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = label,
-                color = textColor,
-                fontSize = if (active) 14.sp else 13.sp,
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1,
-            )
         }
     }
 }

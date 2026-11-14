@@ -69,7 +69,7 @@
         <item>Choose a supported text file in your Android file manager and open it with Hermes Text Editor.</item>
         <item>Every document lives in its own tab under the title bar. The open tab is welded to the page beneath it by a curved foot, so you can tell at a glance which page you are editing. Tap a tab to switch, tap × on it to close. Drag a long tab name sideways to read the rest of it; the row scrolls sideways when the tabs no longer fit.</item>
         <item>Your tabs, the active one and its scroll position come back when you return to the app, including after Android has closed it in the background. Unsaved text stays in the draft of that tab.</item>
-        <item>Recent is the tab on the far left of the strip, right beside the app icon. Tap the icon to come back to it: it lists the files this app has opened, newest first, with New and Open at the top. Tapping a file reopens it, or jumps to the tab that already holds it. It cannot be closed, and when no document is open it is what the app starts on.</item>
+        <item>Recent is not a tab. Tap the app icon at the left of the strip and the list covers the document; while it is showing, the icon grows a little and takes a tinted plate, so you can tell you are not in a document. It lists the files this app has opened, newest first, with New and Open at the top. Tapping a file reopens it, or jumps to the tab that already holds it. Closing the last tab lands here too, and so does a cold start with nothing to restore.</item>
         <item>Tap to place the cursor, type, select, copy and paste. Long filenames stay on one line; swipe the name sideways to read it.</item>
         <item>In Edit Markdown, headings, emphasis, links, lists, quotes and code are styled as you type. All Markdown symbols remain visible and editable; source text is preserved.</item>
         <item>Use the three-dot menu to switch modes. Preview is formatted for reading; Edit Markdown shows the original source. Switching keeps approximately the same document section. Tap a web link in Preview to open your browser.</item>
@@ -119,7 +119,7 @@
     <string name="font_size">Font size</string>
     <string name="tab_limit_reached">Close a tab first: up to 10 documents can stay open</string>
     <string name="recent_tab">Recent</string>
+    <string name="recent_title">Recent files</string>
     <string name="more_menu">More</string>
-    <string name="recent_hint">Files you open in the editor are listed here, newest first.</string>
     <string name="recent_open_now">Open</string>
 </resources>
