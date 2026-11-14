@@ -52,6 +52,9 @@ save_to = body(MAIN, "private fun saveToUri(")
 save_as = body(MAIN, "private fun saveAsToUri(")
 open_doc = body(MAIN, "private val openDocument = registerForActivityResult")
 open_in = body(MAIN, "private fun openIncoming(")
+# 1.7: the picker and the share intent both hand the uri to openUri, so the
+# bounded-read contract is asserted on the one function they share.
+open_uri = body(MAIN, "private fun openUri(")
 restore_last = body(MAIN, "private fun restoreLastSession(")
 
 # --- The manifest replaces single-document identity ----------------------
@@ -85,14 +88,14 @@ check("an unreadable uri degrades to untitled instead of crashing", "tab.title =
 # --- Every open path is bounded ------------------------------------------
 check("BoundedReader has a 5 MB ceiling", "MAX_BYTES: Int = 5 * 1024 * 1024" in BOUNDED)
 check("BoundedReader throws instead of truncating", "TooLargeException" in BOUNDED)
-check("OpenDocument is bounded", "BoundedReader.readText" in open_doc)
-check("the share intent path is bounded", "BoundedReader.readText" in open_in)
+check("the Open dialog is bounded", "openUri(it)" in open_doc and "BoundedReader.readText" in open_uri)
+check("the share intent path is bounded", "private fun openIncoming(uri: Uri) = openUri(uri)" in MAIN and "BoundedReader.readText" in open_uri)
 check("the cold-start read lambda is bounded", "BoundedReader.readText" in restore_last)
 check("a too-large file reports instead of silently failing",
-      open_doc.count("TooLargeException") >= 1 and open_in.count("TooLargeException") >= 1)
+      open_uri.count("TooLargeException") >= 1)
 check("no unbounded readText() call is left in the Activity",
       "bufferedReader(Charsets.UTF_8)?.use { r -> r.readText() }" not in MAIN)
-check("an already-open file is jumped to, not opened twice", "documentKey(" in open_doc and "vm.switchTab(existing.id)" in open_doc)
+check("an already-open file is jumped to, not opened twice", "documentKey(" in open_uri and "vm.switchTab(existing.id)" in open_uri)
 
 # --- Recovery draft lifecycle --------------------------------------------
 retire = body(VM, "private fun retireDraft(")
@@ -107,7 +110,8 @@ check("drafts are per tab", '"draft_${tab.id}.txt"' in VM)
 check("new tab flushes the outgoing draft", "scheduleFlush(activeTab)" in new_tab)
 check("switch flushes the outgoing draft", "scheduleFlush(activeTab)" in switch_tab)
 check("closing a tab retires its draft", "retireDraft(closing)" in close_tab)
-check("closing the last tab leaves a clean untitled tab", "if (_tabs.isEmpty())" in close_tab)
+check("closing the last tab leaves no document and shows Recent",
+      "if (_tabs.isEmpty())" in close_tab and "home = true" in close_tab)
 check("opening a document retires that tab's draft", "retireDraft(tab)" in set_doc)
 check("saving retires the draft", "retireDraft(tab)" in mark)
 check("retire bumps the epoch under the draft lock", "tab.draftEpoch++" in retire and "synchronized(draftLock)" in retire)
@@ -130,7 +134,7 @@ check("attachDraft keeps the v1.5 signature", "fun attachDraft(recoveryFile: Fil
 check("setDocument invalidates an in-flight hydrate", "tab.loadToken++" in set_doc)
 check("an incoming file opens beside the open documents, not over them",
       "openIncoming(uri)" in MAIN and "pendingIncoming" not in MAIN
-      and "vm.openInNewTab(uri, displayName(uri), text)" in MAIN)
+      and "vm.openInNewTab(target, displayName(target), text)" in open_uri)
 
 # --- Grants ---------------------------------------------------------------
 check("saveToUri persists the grant", "takePersistablePermissions(uri)" in save_to)
@@ -188,8 +192,8 @@ check("document operations take the tab id instead of resolving activeTab",
       "fun setDocument(tabId: String" in VM and "fun setDocumentUri(tabId: String" in VM
       and "fun renameTitle(tabId: String" in VM)
 check("open paths add a tab instead of replacing the active one",
-      "vm.openInNewTab(target, displayName(target), text)" in open_doc
-      and "vm.openInNewTab(uri, displayName(uri), text)" in open_in
+      "vm.openInNewTab(target, displayName(target), text)" in open_uri
+      and "vm.setDocument(tabId" not in open_uri
       and "vm.setDocument(tabId" not in open_doc and "vm.setDocument(tabId" not in open_in)
 check("a share on cold start rebuilds the tab strip before it is applied",
       MAIN.index("restoreLastSession(legacy, store)") < MAIN.index("if (incoming != null) handleIncomingIntent(incoming)"))

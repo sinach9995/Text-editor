@@ -10,7 +10,7 @@ Hermes Text Editor is made for distraction-free writing: open a file, write comf
 - Open `.txt`, `.md`, and `.markdown` files with Android's system file picker
 - Open supported files directly from your Android file manager
 - Save the current document normally, with clear save and error feedback
-- Press and hold **Save ▲** to use:
+- Press and hold the floppy icon (bottom-right corner) to use:
   - **Save as…** — save a copy with a new filename, folder, or `.txt` / `.md` extension while preserving the exact original content
   - **Export as plain text…** — create a separate readable `.txt` copy of a Markdown document without Markdown symbols
 - Automatic local draft recovery, per tab
@@ -33,7 +33,7 @@ Existing Markdown files open in **Preview** mode for comfortable reading. Use th
 
 Markdown source remains unchanged when you edit or save it. Source mode adds visual styling for common Markdown elements while keeping syntax visible and editable. New Markdown documents open in source-editing mode.
 
-If you need a readable text-only copy, press and hold **Save ▲** and choose **Export as plain text…**. The original Markdown file is not changed.
+If you need a readable text-only copy, press and hold the floppy icon and choose **Export as plain text…**. The original Markdown file is not changed.
 
 ## Find, Undo, and Redo
 
@@ -76,9 +76,21 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 - Android 6.0 (API 23) or later
 
+## The buttons
+
+The five document actions sit in a column in the bottom-right corner, as line icons rather than words in a bar: **Save** (floppy), **New** (page with a plus), **Open** (folder), **Undo** and **Redo**, in that order from the top down.
+
+The column reacts to the keyboard. While it is open, New and Open are hidden and only Save, Undo and Redo remain. In landscape with the keyboard open the remaining three lie down in a row instead of a column, because there is no vertical room left.
+
+## The header and the Recent tab
+
+The top of the screen is one band: the app icon, then the tabs, then a half disc in the right corner that opens the menu. There is no separate title bar any more, because it only repeated the name of the tab below it.
+
+Tapping the app icon returns to **Recent**, the tab pinned to the far left of the strip. Recent lists the files this app has opened, newest first, with New and Open at the top; tapping a file reopens it or jumps to the tab that already holds it. It cannot be closed, and it is what the app shows when no document is open — closing the last tab lands there instead of leaving a blank document behind.
+
 ## Tabs
 
-A strip under the header shows every open document. Tap a tab to switch to it; the dot before its name means it has unsaved changes, and **×** closes it. Closing a tab that has unsaved changes asks first.
+A strip in that band shows every open document. Tap a tab to switch to it; the dot before its name means it has unsaved changes, and **×** closes it. Closing a tab that has unsaved changes asks first.
 
 The open tab is not a floating chip: it takes the colour of the page and is welded to the text below it by a curved foot that leaves the tab's side vertically, sweeps outwards and lands flat on the page edge. The foot is drawn per tab, so it travels with the tab while the strip scrolls. A long tab name can be dragged sideways to read the rest of it, and the row scrolls sideways once the tabs no longer fit.
 
@@ -88,8 +100,8 @@ Up to ten documents can stay open, and the app refuses new tabs once the combine
 
 ## Current version
 
-- **Version:** 1.6.8
-- **Version code:** 15
+- **Version:** 1.7.0
+- **Version code:** 16
 - **Package:** `com.asoraksh.hermeseditor`
 
 ## Independent project notice

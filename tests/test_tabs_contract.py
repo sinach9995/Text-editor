@@ -14,6 +14,10 @@ SRC = ROOT / "app/src/main/java/com/asoraksh/hermeseditor"
 MAIN = (SRC / "MainActivity.kt").read_text(encoding='utf-8')
 VM = (SRC / "EditorViewModel.kt").read_text(encoding='utf-8')
 STRIP = (SRC / "TabStrip.kt").read_text(encoding='utf-8') if (SRC / "TabStrip.kt").exists() else ""
+CONTROLS = (SRC / "EditorFloatingControls.kt").read_text(encoding='utf-8')
+RECENT = (SRC / "RecentPage.kt").read_text(encoding='utf-8') if (SRC / "RecentPage.kt").exists() else ""
+RECENT_STORE = (SRC / "RecentFiles.kt").read_text(encoding='utf-8') if (SRC / "RecentFiles.kt").exists() else ""
+README = (ROOT / "README.md").read_text(encoding='utf-8')
 MANIFEST = (SRC / "TabManifest.kt").read_text(encoding='utf-8')
 GRADLE = (ROOT / "app/build.gradle.kts").read_text(encoding='utf-8')
 WORKFLOW = (ROOT / ".github/workflows/android-release.yml").read_text(encoding='utf-8')
@@ -47,7 +51,8 @@ close_tab = body(VM, "fun closeTab(")
 switch_tab = body(VM, "fun switchTab(")
 close_ui = body(MAIN, "fun requestCloseTab(")
 new_ui = body(MAIN, "fun newFile(")
-topbar_call = body(MAIN, "Column {\n                    TopBar(")
+header = body(MAIN, "private fun HeaderBar(")
+buttons = body(CONTROLS, "fun FloatingActions(")
 
 # --- Tab strip ------------------------------------------------------------
 check("TabStrip exists", bool(STRIP))
@@ -63,13 +68,27 @@ check("its feet reach the page through a visible S-curve, not a chamfer",
 check("the strip starts flush under the top bar", "top = 12.dp" not in STRIP)
 check("a title wider than the tab can be dragged sideways",
       "horizontalScroll(scroll)" in STRIP and "rememberTextMeasurer" in STRIP)
-check("the top bar no longer repeats the active tab's name",
-      "fun TopBar(theme: AppTheme" in MAIN and '"Hermes Text Editor",' in MAIN)
+# --- One band at the top (1.7) -------------------------------------------
+check("the header is a single band, not a title bar plus a strip",
+      "fun HeaderBar(" in MAIN and "fun TopBar(" not in MAIN)
+check("the band starts with the app icon", "R.drawable.hermes_editor_icon" in header)
+check("the band is one row of 52dp", "height(52.dp)" in header)
+check("the file name is no longer repeated above the tabs", "20.sp" not in header)
+check("tapping the icon goes home", "onHome" in header and ".clickable(onClick = onHome)" in header)
+check("the menu is half a disc in the corner",
+      "CornerOverflow(" in header and "HalfDiscShape" in MAIN
+      and "size.width * 2f" in MAIN)
 check("strip closes with a dedicated hit target", "\"×\"" in STRIP and "onClose" in STRIP)
 check("strip scrolls and follows the active tab", "LazyRow" in STRIP and "animateScrollToItem(activeIndex)" in STRIP)
-check("strip is rendered under TopBar", "TabStrip(" in topbar_call)
-check("strip disappears with compact chrome", "if (!compactChrome) TabStrip(" in MAIN)
-check("strip is bound to the ViewModel, not duplicated state", "tabs = vm.tabs" in MAIN and "activeId = vm.activeTabId" in MAIN)
+check("strip is rendered inside the header", "TabStrip(" in header)
+check("the strip is never dropped for compact chrome", "compactChrome) TabStrip(" not in MAIN)
+check("strip is bound to the ViewModel, not duplicated state", "tabs = vm.tabs" in MAIN and "activeTabId = vm.activeTabId" in MAIN)
+check("the home tab is pinned outside the scrolling row",
+      "HomeTab(label = homeLabel, active = homeActive" in STRIP
+      and STRIP.index("HomeTab(label") < STRIP.index("LazyRow("))
+check("the home tab cannot be closed", "HomeTab(" in STRIP and "onClose" not in body(STRIP, "private fun HomeTab("))
+check("an open document tab is not marked active while home is showing",
+      "!homeActive && tab.id == activeId" in STRIP)
 
 # --- Tab operations -------------------------------------------------------
 check("a new tab is refused past the cap", "if (!canOpenAnotherTab()) return false" in new_tab)
@@ -105,7 +124,11 @@ check("budget is summed from the manifest records, not live text",
 check("per-tab history is capped", "EditorHistory(maxEntries = 30, maxTotalChars = 120_000)" in VM)
 
 # --- Font stepper ---------------------------------------------------------
-check("TopBar takes a font size", "fontSize: Float = 17f" in MAIN and "onFontSize: (Float) -> Unit" in MAIN)
+check("the header takes a font size", "fontSize: Float" in header and "onFontSize: (Float) -> Unit" in header)
+check("the font row starts in the same column as the others", "padding(start = 12.dp, end = 12.dp)" in header)
+check("the stepper hugs the number", "size(28.dp)" in MAIN and "width(28.dp)" in MAIN)
+check("the language row has no globe glyph", "LanguageGlyph" not in MAIN)
+check("the theme icon trails its text", "trailingIcon" in header)
 check("the menu has minus and plus steps", "FontStep(\"−\"" in MAIN and "FontStep(\"+\"" in MAIN)
 check("the stepper disables at the ends", "enabled = fontSize > 13f" in MAIN and "enabled = fontSize < 30f" in MAIN)
 check("a chosen size is persisted", 'prefs.edit().putFloat("document_font_size", fontSize).apply()' in MAIN)
@@ -149,9 +172,49 @@ check("About shows the installed version",
       "getPackageInfo(packageName, 0).versionName" in MAIN
       and "stringResource(R.string.about_body, version)" in MAIN)
 
+# --- The corner column (1.7) ----------------------------------------------
+check("the full-width bottom bar is gone", "ActionBar(" not in MAIN and "bottomBar =" not in MAIN)
+check("the actions are one composable, in the corner",
+      "FloatingActions(" in MAIN and "Alignment.BottomEnd" in MAIN)
+check("the order is Save, New, Open, Undo, Redo from the top",
+      buttons.index("R.string.ui_save") < buttons.index("R.string.ui_new") <
+      buttons.index("R.string.ui_open") < buttons.index("R.string.undo") <
+      buttons.index("R.string.redo"))
+check("the stack is vertical unless the landscape keyboard is up",
+      "inRow = compactChrome" in MAIN and "if (inRow) Row(" in CONTROLS and "else Column(" in CONTROLS)
+check("a keyboard open in portrait hides New and Open",
+      "showDocuments = imeBottom == 0" in MAIN and "if (showDocuments) {" in CONTROLS)
+check("the buttons are 40dp dots, not a bar", "size(40.dp)" in CONTROLS and "CircleShape" in CONTROLS)
+check("New, Open and Save are line icons",
+      all(k in CONTROLS for k in ("LineIconKind.NewFile", "LineIconKind.OpenFolder", "LineIconKind.Save"))
+      and "Stroke(" in CONTROLS)
+check("Save as and Export are on a long press of Save",
+      "onLongClick = { saveMenu = true }" in CONTROLS and "R.string.ui_save_as" in CONTROLS)
+check("New still offers Text or Markdown on a long press",
+      "onLongClick = { newMenu = true }" in CONTROLS and "R.string.new_md" in CONTROLS)
+
+# --- The Recent tab (1.7) -------------------------------------------------
+check("Recent is a page of its own", bool(RECENT) and "fun RecentPage(" in RECENT)
+check("Recent offers New and Open", "R.string.ui_new" in RECENT and "R.string.ui_open" in RECENT)
+check("Recent lists files, not folders", "files: List<RecentFile>" in RECENT and "onFile" in RECENT)
+check("Recent marks the files that are open right now", "in openUris" in RECENT or "file.uri in openUris" in RECENT)
+check("the history is stored, capped and de-duplicated",
+      bool(RECENT_STORE) and "LIMIT = 12" in RECENT_STORE and "if (item.uri == uri) continue" in RECENT_STORE)
+check("opening a file records it", "rememberRecent(target, displayName(target))" in MAIN)
+check("a recent file that is already open is jumped to, not reopened twice",
+      "vm.tabs.firstOrNull { it.uri?.toString() == file.uri }" in MAIN)
+check("closing the last tab lands on Recent, it does not open a blank one",
+      'activeTabId = ""' in close_tab and "home = true" in close_tab)
+check("an empty session starts on Recent", "legacyDraft.isNullOrEmpty() && lastUri == null" in VM)
+check("an empty manifest is cleared instead of left to be restored", "s.clearManifest()" in VM)
+check("the Recent page covers the document instead of unmounting it",
+      "if (vm.home) RecentPage(" in MAIN)
+check("tapping the corner menu in a document tab leaves Recent",
+      "if (id == vm.activeTabId && !vm.home) return" in MAIN)
+
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.6.8", 'versionName = "1.6.8"' in GRADLE)
-check("versionCode was bumped past 1.6.2", "versionCode = 15" in GRADLE)
+check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)
+check("versionCode was bumped past 1.6.8", "versionCode = 16" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover the codec and the reader",
