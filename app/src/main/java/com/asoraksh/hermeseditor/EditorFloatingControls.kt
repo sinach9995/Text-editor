@@ -166,10 +166,15 @@ internal enum class LineIconKind { NewFile, OpenFolder, Save }
         val w = 1.7.dp.toPx()
         val stroke = Stroke(width = w, cap = StrokeCap.Round, join = StrokeJoin.Round)
         fun o(x: Float, y: Float) = Offset(x * s, y * s)
-        fun poly(vararg points: Pair<Float, Float>) {
+        // Flat coordinate pairs, so the call sites read as a path rather than a
+        // wall of `x to y`.
+        fun poly(vararg xy: Float) {
             val path = Path()
-            points.forEachIndexed { i, (x, y) ->
-                if (i == 0) path.moveTo(x * s, y * s) else path.lineTo(x * s, y * s)
+            var i = 0
+            while (i + 1 < xy.size) {
+                if (i == 0) path.moveTo(xy[i] * s, xy[i + 1] * s)
+                else path.lineTo(xy[i] * s, xy[i + 1] * s)
+                i += 2
             }
             drawPath(path, tint, style = stroke)
         }
