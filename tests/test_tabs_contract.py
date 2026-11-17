@@ -209,8 +209,8 @@ check("the order is Save, New, Open, Undo, Redo from the top",
       buttons.index("R.string.ui_save") < buttons.index("R.string.ui_new") <
       buttons.index("R.string.ui_open") < buttons.index("R.string.undo") <
       buttons.index("R.string.redo"))
-check("the stack is vertical unless the landscape keyboard is up",
-      "inRow = compactChrome" in MAIN and "if (inRow) Row(" in CONTROLS and "else Column(" in CONTROLS)
+check("the stack is vertical unless the keyboard is up",
+      "inRow = imeBottom > 0" in MAIN and "if (inRow) Row(" in CONTROLS and "else Column(" in CONTROLS)
 check("a keyboard open in portrait hides New and Open",
       "showDocuments = imeBottom == 0" in MAIN and "if (showDocuments) {" in CONTROLS)
 check("the buttons are 46dp dots, not a bar", "private val DOT = 46.dp" in CONTROLS and "CircleShape" in CONTROLS)
@@ -259,11 +259,22 @@ check("an edit with no tab open is ignored",
 check("the draft ceiling is the same on read and write",
       "DRAFT_MAX_BYTES" in body(VM, "private fun writeDraft(")
       and "DRAFT_MAX_BYTES" in body(VM, "private fun readDraft("))
-check("landscape with a keyboard reserves room for the button row",
-      "compactChrome -> 70.dp" in MAIN)
+check("keyboard mode reserves room for the button row",
+      "if (imeBottom == 0) 280.dp else 70.dp" in MAIN)
 check("Recent headings exist in both languages",
       'name="recent_app_name"' in STRINGS_EN and 'name="recent_app_name"' in STRINGS_FA
       and 'name="recent_title">Recent<' in STRINGS_EN)
+check("Back returns from Recent overlay when tabs exist",
+      "vm.home && vm.tabs.isNotEmpty() -> vm.showDocument()" in MAIN)
+check("document-only menu items are gated on an open visible document",
+      "val showingDoc = !homeActive && tabs.isNotEmpty()" in header and "if (showingDoc)" in header)
+check("openInNewTab enforces total char budget and reports memory cap",
+      "TabBudget.canAccept(records(), text.length)" in body(VM, "fun openInNewTab(")
+      and 'name="tab_memory_reached"' in STRINGS_EN and 'name="tab_memory_reached"' in STRINGS_FA)
+check("long-pressing a closed Recent row forgets it",
+      "onForget = ::forgetRecent" in MAIN and "combinedClickable(" in RECENT)
+check("legacy bottom-bar arrow hints are removed from both locales",
+      "New ▲" not in STRINGS_EN and "Save ▲" not in STRINGS_EN and "▲" not in STRINGS_FA)
 
 # --- Version + CI ---------------------------------------------------------
 check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)

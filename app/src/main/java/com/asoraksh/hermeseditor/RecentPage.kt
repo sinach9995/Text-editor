@@ -1,8 +1,9 @@
 package com.asoraksh.hermeseditor
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.sp
  * it has opened, newest first. Nothing here reaches outside the app to list files
  * it has never seen.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentPage(
     files: List<RecentFile>,
@@ -56,6 +58,7 @@ fun RecentPage(
     onNew: () -> Unit,
     onOpen: () -> Unit,
     onFile: (RecentFile) -> Unit,
+    onForget: (RecentFile) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -99,7 +102,13 @@ fun RecentPage(
             if (files.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(files, key = { it.uri }) { file ->
-                        RecentRow(file = file, open = file.uri in openUris, onClick = { onFile(file) })
+                        val open = file.uri in openUris
+                        RecentRow(
+                            file = file,
+                            open = open,
+                            onClick = { onFile(file) },
+                            onLongClick = if (open) null else ({ onForget(file) }),
+                        )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
                     }
                 }
@@ -125,10 +134,11 @@ private fun RecentAction(label: String, primary: Boolean, onClick: () -> Unit, m
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecentRow(file: RecentFile, open: Boolean, onClick: () -> Unit) {
+private fun RecentRow(file: RecentFile, open: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(vertical = 10.dp)) {

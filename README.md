@@ -80,7 +80,7 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 The five document actions sit in a column in the bottom-right corner, as line icons rather than words in a bar: **Save** (floppy), **New** (page with a plus), **Open** (folder), **Undo** and **Redo**, in that order from the top down. Each one is a 46dp dot, so the target is bigger than the 40dp square it replaced.
 
-The column reacts to the keyboard. While it is open, New and Open are hidden and only Save, Undo and Redo remain. In landscape with the keyboard open the remaining three lie down in a row instead of a column, because there is no vertical room left.
+The column reacts to the keyboard. While the keyboard is open, New and Open are hidden and the remaining three (Save, Undo and Redo) lie down in a compact row along the bottom-right so they stay clear of the line you are typing.
 
 ## The header and the Recent page
 
@@ -88,7 +88,7 @@ The top of the screen is one band: the app icon, then the tabs, then a round men
 
 **Recent is a page behind the app icon, not a tab.** Tapping the icon opens it, and while it is open no tab in the strip is drawn as active -- the icon itself grows and takes a tinted plate, which is the only marker that you are not in a document. Tapping a tab, or New, leaves the page again.
 
-The page opens with the app name over the word **Recent** and a rule across the width under them; everything below the rule is the list. New and Open sit under the rule, and beneath them every document open right now followed by the files this app has opened, newest first. A restored tab is listed too: a document you have open is recent by definition.
+The page opens with the app name over the word **Recent** and a rule across the width under them; everything below the rule is the list. New and Open sit under the rule, and beneath them every document open right now followed by the files this app has opened, newest first. A restored tab is listed too: a document you have open is recent by definition. Press and hold a closed entry on the list to forget it.
 
 Grants matter here. A file opened from Recent is read through a permission this app was given when the file was first picked, so that permission is kept while a list entry still points at the file, and handed back when the entry is pushed off the end (the list keeps twelve) or the row turns out to be unreadable. Closing the last tab lands on Recent with an empty strip rather than leaving a blank document behind.
 

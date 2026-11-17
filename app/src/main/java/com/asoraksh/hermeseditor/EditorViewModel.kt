@@ -145,11 +145,6 @@ class EditorViewModel : ViewModel() {
         home = false
     }
 
-    /** Leave the Recent page; the caller has already opened or created a tab. */
-    private fun leaveHome() {
-        home = false
-    }
-
     // --- v1.5-compatible surface, delegated to the active tab -------------
 
     val documentUri: Uri? get() = activeTab.uri
@@ -271,7 +266,7 @@ class EditorViewModel : ViewModel() {
     fun switchTab(id: String): Boolean {
         // Tapping the tab that is already active still has to leave the Recent
         // page, otherwise the first tap after the icon does nothing.
-        leaveHome()
+        showDocument()
         if (id == activeTabId) return true
         val target = _tabs.firstOrNull { it.id == id } ?: return false
         scheduleFlush(activeTab)
@@ -568,7 +563,7 @@ class EditorViewModel : ViewModel() {
      * (the caller then leaves both the strip and the file untouched).
      */
     fun openInNewTab(uri: Uri?, newTitle: String, text: String): String? {
-        if (!canOpenAnotherTab()) return null
+        if (!TabBudget.canAccept(records(), text.length)) return null
         val tab = TabState(nextId())
         tab.hydrated = true
         scheduleFlush(activeTab)
@@ -599,12 +594,42 @@ class EditorViewModel : ViewModel() {
      * refers to it. Persistable grants are a limited resource (~128 per app)
      * and a replaced uri used to keep its grant for the life of the process.
      */
-    /** True when [text] is still exactly what [tabId] holds (a save raced the keyboard). */
-    /** The text a tab holds right now, or null when it is gone. */
-    fun textOf(tabId: String): String? = _tabs.firstOrNull { it.id == tabId }?.editor?.text
+    /** The text a tab holds right now, or null when it is gone or not yet hydrated. */
+    fun textOf(tabId: String): String? =
+        _tabs.firstOrNull { it.id == tabId && it.hydrated }?.editor?.text
 
+    /** True when [text] is still exactly what [tabId] holds (a save raced the keyboard). */
     fun sameText(tabId: String, text: String): Boolean =
-        _tabs.firstOrNull { it.id == tabId }?.editor?.text == text
+        _tabs.firstOrNull { it.id == tabId && it.hydrated }?.editor?.text == text
+
+    /**
+     * Returns [tabId]'s real text, hydrating its stub first if process death
+     * recreated the Activity while a system CreateDocument picker was open.
+     */
+    suspend fun awaitTextOf(tabId: String): String? {
+        val tab = _tabs.firstOrNull { it.id == tabId } ?: return null
+        if (tab.hydrated) return tab.editor.text
+        val draft = withContext(Dispatchers.IO) { readDraft(tab) }
+        if (!_tabs.contains(tab)) return null
+        if (tab.hydrated) return tab.editor.text
+        val uri = tab.uri
+        val loaded = draft ?: if (uri == null) "" else {
+            withContext(Dispatchers.IO) { runCatching { reader?.invoke(uri) }.getOrNull() } ?: return null
+        }
+        if (!_tabs.contains(tab)) return null
+        if (!tab.hydrated) {
+            tab.loadToken++
+            tab.loading = false
+            applyText(tab, loaded, dirty = draft != null)
+            if (draft != null) {
+                pendingLegacyText = null
+                legacyDraftFile = null
+            }
+            bumpSession()
+            persistManifest()
+        }
+        return tab.editor.text
+    }
 
     private fun replaceUri(tab: TabState, uri: Uri?) {
         val old = tab.uri

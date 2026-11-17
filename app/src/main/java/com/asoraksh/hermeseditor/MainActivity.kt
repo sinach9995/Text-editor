@@ -17,7 +17,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,12 +39,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
@@ -56,7 +49,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDirection
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -68,8 +60,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
@@ -203,7 +193,7 @@ class MainActivity : ComponentActivity() {
                     if (fromRecent) forgetRecent(RecentFile(target.toString(), displayName(target)))
                 }
                 vm.openInNewTab(target, displayName(target), text) == null ->
-                    notifyMessage(getString(R.string.tab_limit_reached))
+                    notifyMessage(getString(if (vm.tabs.size >= TabBudget.MAX_TABS) R.string.tab_limit_reached else R.string.tab_memory_reached))
                 else -> rememberRecent(target, displayName(target))
             }
         }
@@ -231,31 +221,37 @@ class MainActivity : ComponentActivity() {
             android.provider.DocumentsContract.getDocumentId(uri)
         } else null
     }.getOrNull() ?: uri.toString()
-    private val createDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        uri?.let { saveToUri(it) }
-    }
+    private var pendingSaveTabId: String? = null
+    private fun takeSaveTabId(): String = pendingSaveTabId?.also { pendingSaveTabId = null } ?: vm.activeTabId
+
     private val createTxtDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        uri?.let { saveAsToUri(it) }
+        if (uri != null) saveAsToUri(uri) else pendingSaveTabId = null
     }
     private val createMdDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
-        uri?.let { saveAsToUri(it) }
+        if (uri != null) saveAsToUri(uri) else pendingSaveTabId = null
     }
     private val exportDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        uri?.let { target ->
-            val plain = markdownToPlainText(vm.editor.text)
-            lifecycleScope.launch {
-                val ok = withContext(Dispatchers.IO) {
-                    runCatching {
-                        requireNotNull(contentResolver.openOutputStream(target, "wt"))
-                            .bufferedWriter(Charsets.UTF_8).use { w -> w.write(plain) }
-                    }.isSuccess
-                }
-                notifyMessage(
-                    if (ok) getString(R.string.exported, displayName(target))
-                    else getString(R.string.save_failed)
-                )
+        val target = uri ?: run { pendingSaveTabId = null; return@registerForActivityResult }
+        val tabId = takeSaveTabId()
+        lifecycleScope.launch {
+            val raw = vm.awaitTextOf(tabId) ?: return@launch
+            val plain = markdownToPlainText(raw)
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    requireNotNull(contentResolver.openOutputStream(target, "wt"))
+                        .bufferedWriter(Charsets.UTF_8).use { w -> w.write(plain) }
+                }.isSuccess
             }
+            notifyMessage(
+                if (ok) getString(R.string.exported, displayName(target))
+                else getString(R.string.save_failed)
+            )
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("pending_save_tab_id", pendingSaveTabId)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -275,6 +271,7 @@ class MainActivity : ComponentActivity() {
         // A tab that points at a new uri drops the old grant; only the Activity
         // can release it, only the tab model knows when the last reference goes.
         vm.onReleaseUriPermission = ::releasePermission
+        pendingSaveTabId = savedInstanceState?.getString("pending_save_tab_id")
 
         // A replayed launch intent must NOT overwrite unsaved edits on a
         // recreation (rotation, language switch, process death). Only a truly
@@ -334,16 +331,26 @@ class MainActivity : ComponentActivity() {
     // A share and the Open dialog are the same operation once the uri is here:
     // one dedupe rule, one read, one recency entry.
     private fun openIncoming(uri: Uri) = openUri(uri)
+    private fun dedupeSavedUri(ownerTabId: String, uri: Uri) {
+        val key = documentKey(uri)
+        val duplicates = vm.tabs.filter { tab ->
+            tab.id != ownerTabId && tab.uri?.let { it == uri || documentKey(it) == key } == true
+        }
+        for (dup in duplicates) {
+            if (dup.isDirty) vm.setDocumentUri(dup.id, null) else vm.closeTab(dup.id)
+        }
+    }
+
     private fun saveToUri(uri: Uri) {
         // Pin the tab: the write below is async, and a tab switch in that window
         // used to move the new uri, title and clean flag onto the OTHER tab --
         // which then saved its own text into this file on the next Save.
-        val tabId = vm.activeTabId
-        val draft = vm.textOf(tabId) ?: return
+        val tabId = takeSaveTabId()
         // A CreateDocument grant is temporary: without persisting it here the
         // file cannot be reopened after process death.
         takePersistablePermissions(uri)
         lifecycleScope.launch {
+            val draft = vm.awaitTextOf(tabId) ?: return@launch
             val result: Result<Unit> = withContext(Dispatchers.IO) {
                 runCatching {
                     requireNotNull(contentResolver.openOutputStream(uri, "wt"))
@@ -357,6 +364,7 @@ class MainActivity : ComponentActivity() {
                 fallbackSaveAsAfterDenied(failure)
             } else {
                 vm.setDocumentUri(tabId, uri)
+                dedupeSavedUri(tabId, uri)
                 vm.renameTitle(tabId, displayName(uri))
                 // Text typed while the write was in flight is not in the file.
                 // Clearing the dirty flag and retiring the recovery draft here
@@ -368,10 +376,10 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun saveAsToUri(uri: Uri) {
-        val tabId = vm.activeTabId
-        val draft = vm.textOf(tabId) ?: return
+        val tabId = takeSaveTabId()
         takePersistablePermissions(uri)
         lifecycleScope.launch {
+            val draft = vm.awaitTextOf(tabId) ?: return@launch
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     requireNotNull(contentResolver.openOutputStream(uri, "wt"))
@@ -380,6 +388,7 @@ class MainActivity : ComponentActivity() {
             }
             if (ok) {
                 vm.setDocumentUri(tabId, uri)
+                dedupeSavedUri(tabId, uri)
                 vm.renameTitle(tabId, displayName(uri))
                 // Same guard as saveToUri: only retire the draft when the file
                 // holds exactly the text on screen.
@@ -512,12 +521,6 @@ class MainActivity : ComponentActivity() {
         var cursorVisibilityRequest by remember { mutableStateOf(false) }
         val cursorRequester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
         val imeBottom = WindowInsets.ime.getBottom(density)
-        // Landscape with the keyboard open is the only layout with no room left:
-        // the New/Open/Save bar floats over the text and a 72dp header eats a
-        // third of the screen.  There, keep just Undo/Redo and a one-line
-        // header; everything returns when the keyboard closes.
-        val compactChrome = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
-            Configuration.ORIENTATION_LANDSCAPE && imeBottom > 0
         var viewportHeight by remember { mutableStateOf(0) }
         var editorFocused by remember { mutableStateOf(false) }
         fun sourceAnchor(screen: Offset): DocumentAnchor {
@@ -697,13 +700,14 @@ class MainActivity : ComponentActivity() {
                 val layout = textLayout
                 if (layout != null && layout.layoutInput.text.text == text && pinchAnchor == null && editorFocused) {
                     val rect = layout.getCursorRect(editor.selection.end.coerceIn(0, text.length))
-                    val margin = with(density) { 12.dp.toPx() }
+                    val topMargin = with(density) { 12.dp.toPx() }
+                    val bottomMargin = with(density) { (if (imeBottom > 0) 70.dp else 12.dp).toPx() }
                     val visibleTop = rect.top + textTop - editorScroll.value
                     val visibleBottom = rect.bottom + textTop - editorScroll.value
-                    if (visibleTop < margin || visibleBottom > viewportHeight - margin) {
+                    if (visibleTop < topMargin || visibleBottom > viewportHeight - bottomMargin) {
                         cursorVisibilityRequest = true
                         try {
-                            cursorRequester.bringIntoView(rect.inflate(margin))
+                            cursorRequester.bringIntoView(rect.inflate(topMargin))
                         } finally {
                             cursorVisibilityRequest = false
                         }
@@ -778,7 +782,9 @@ class MainActivity : ComponentActivity() {
             }
             // No warning here: "New" adds a tab and leaves the current one
             // intact, so asking about discarding text was a lie.
-            if (!vm.newDocument(markdown)) notifyMessage(getString(R.string.tab_limit_reached))
+            if (!vm.newDocument(markdown)) {
+                notifyMessage(getString(if (vm.tabs.size >= TabBudget.MAX_TABS) R.string.tab_limit_reached else R.string.tab_memory_reached))
+            }
         }
         fun setLang(code: String) {
             if (code == lang) return
@@ -852,8 +858,11 @@ class MainActivity : ComponentActivity() {
         }
         MaterialTheme(colorScheme = colors) {
             BackHandler {
-                // Dismiss the Find bar before leaving the app.
-                if (finding) finding = false else { vm.flushAutosave(); finish() }
+                when {
+                    finding -> finding = false
+                    vm.home && vm.tabs.isNotEmpty() -> vm.showDocument()
+                    else -> { saveScrollPosition(); vm.flushAutosave(); finish() }
+                }
             }
             Scaffold(
                 containerColor = colors.background,
@@ -881,7 +890,7 @@ class MainActivity : ComponentActivity() {
                         homeActive = vm.home,
                         onSelectTab = ::selectTab,
                         onCloseTab = ::requestCloseTab,
-                        onHome = { vm.goHome(); focusManager.clearFocus() },
+                        onHome = { finding = false; vm.goHome(); focusManager.clearFocus() },
                     )
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
@@ -912,9 +921,10 @@ class MainActivity : ComponentActivity() {
                                 if (!cursorVisibilityRequest || !editorFocused || pinchAnchor != null || pendingAnchor != null) return 0f
                                 val layout = textLayout ?: return 0f
                                 val cursor = layout.getCursorRect(editor.selection.end.coerceIn(0, text.length))
-                                val margin = with(density) { 12.dp.toPx() }
-                                val top = cursor.top + textTop - editorScroll.value - margin
-                                val bottom = cursor.bottom + textTop - editorScroll.value + margin
+                                val topMargin = with(density) { 12.dp.toPx() }
+                                val bottomMargin = with(density) { (if (imeBottom > 0) 70.dp else 12.dp).toPx() }
+                                val top = cursor.top + textTop - editorScroll.value - topMargin
+                                val bottom = cursor.bottom + textTop - editorScroll.value + bottomMargin
                                 return when {
                                     top < 0f -> top
                                     bottom > containerSize -> bottom - containerSize
@@ -925,20 +935,9 @@ class MainActivity : ComponentActivity() {
                     ) {
                     Box(Modifier.fillMaxSize().clipToBounds().documentPinchZoom(zoomDocument, startPinch, endPinch)
                         .verticalScroll(editorScroll).padding(horizontal = 20.dp)
-                        // Room for the corner column: without it the last lines of a
-                        // document sit under the buttons, and the place you finish
-                        // writing is the place you cannot read.
-                        .padding(
-                            top = 20.dp,
-                            bottom = when {
-                                imeBottom == 0 -> 120.dp
-                                // Landscape with the keyboard up turns the column into
-                                // a row along the bottom edge; 24dp left the last line
-                                // of text sitting under it.
-                                compactChrome -> 70.dp
-                                else -> 24.dp
-                            }
-                        )) {
+                        // Room for the corner buttons: 5 stacked dots when closed,
+                        // 1 compact horizontal row when the keyboard is open.
+                        .padding(top = 20.dp, bottom = if (imeBottom == 0) 280.dp else 70.dp)) {
                     BasicTextField(
                         value = editor,
                         onValueChange = { newValue ->
@@ -1008,13 +1007,13 @@ class MainActivity : ComponentActivity() {
                 if (!finding && !mdPreview) {
                     FloatingActions(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 10.dp),
-                        inRow = compactChrome,
+                        inRow = imeBottom > 0,
                         showDocuments = imeBottom == 0,
                         canUndo = historyTick >= 0 && history.canUndo,
                         canRedo = historyTick >= 0 && history.canRedo,
-                        onSave = { vm.documentUri?.let(::saveToUri) ?: run { showFormatChoice = true } },
+                        onSave = { vm.documentUri?.let { pendingSaveTabId = vm.activeTabId; saveToUri(it) } ?: run { showFormatChoice = true } },
                         onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
-                        onExport = { exportDocument.launch(baseName(title) + ".txt") },
+                        onExport = { pendingSaveTabId = vm.activeTabId; exportDocument.launch(baseName(title) + ".txt") },
                         onNew = { newFile(false) },
                         onNewMarkdown = { newFile(true) },
                         onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
@@ -1045,6 +1044,7 @@ class MainActivity : ComponentActivity() {
                     onNew = { newFile(false) },
                     onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
                     onFile = { openRecent(it) },
+                    onForget = ::forgetRecent,
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
                 )
             }
@@ -1077,8 +1077,8 @@ class MainActivity : ComponentActivity() {
                 title = { Text(stringResource(R.string.saveas_title)) },
                 text = {
                     Column {
-                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); createTxtDocument.launch(baseName(title) + ".txt") }) { Text(stringResource(R.string.saveas_txt)) }
-                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); createMdDocument.launch(baseName(title) + ".md") }) { Text(stringResource(R.string.saveas_md)) }
+                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); pendingSaveTabId = vm.activeTabId; createTxtDocument.launch(baseName(title) + ".txt") }) { Text(stringResource(R.string.saveas_txt)) }
+                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); pendingSaveTabId = vm.activeTabId; createMdDocument.launch(baseName(title) + ".md") }) { Text(stringResource(R.string.saveas_md)) }
                     }
                 },
                 confirmButton = { },
@@ -1133,8 +1133,9 @@ class MainActivity : ComponentActivity() {
         var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
         val homeLabel = stringResource(R.string.recent_tab)
         val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
+        val showingDoc = !homeActive && tabs.isNotEmpty()
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(start = 10.dp), verticalAlignment = Alignment.Bottom) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(start = 10.dp, end = 10.dp), verticalAlignment = Alignment.Bottom) {
                 // A real target, not decoration: tapping the icon is the way back
                 // to Recent, the same way a browser logo is a home button. While
                 // Recent is showing, the icon says so -- it grows a little and
@@ -1168,7 +1169,12 @@ class MainActivity : ComponentActivity() {
                     onClose = onCloseTab,
                     modifier = Modifier.weight(1f),
                 )
-                CornerOverflow(expanded = expanded, onOpen = { expanded = true }, onDismiss = { expanded = false }) {
+                CornerOverflow(
+                    expanded = expanded,
+                    onOpen = { expanded = true },
+                    onDismiss = { expanded = false },
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                ) {
                     // Theme: the text comes first and the sun/moon trails it, so
                     // the row reads as one line instead of an icon and a label.
                     DropdownMenuItem(
@@ -1182,9 +1188,11 @@ class MainActivity : ComponentActivity() {
                         text = { Text(if (lang == "fa") "English" else "فارسی") },
                         onClick = { setLang(if (lang == "fa") "en" else "fa"); expanded = false }
                     )
-                    DropdownMenuItem(text = { Text(stringResource(R.string.dir_menu)) }, onClick = { onDirRequest(); expanded = false })
-                    if (isMarkdown) DropdownMenuItem({ Text(stringResource(if (previewing) R.string.edit_md else R.string.preview_md)) }, onClick = { onTogglePreview(); expanded = false })
-                    DropdownMenuItem({ Text(stringResource(R.string.find)) }, onClick = { onFind(); expanded = false })
+                    if (showingDoc) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.dir_menu)) }, onClick = { onDirRequest(); expanded = false })
+                        if (isMarkdown) DropdownMenuItem({ Text(stringResource(if (previewing) R.string.edit_md else R.string.preview_md)) }, onClick = { onTogglePreview(); expanded = false })
+                        DropdownMenuItem({ Text(stringResource(R.string.find)) }, onClick = { onFind(); expanded = false })
+                    }
                     // Font size stepper: the label sits in the same 12dp column as
                     // every other row and the buttons hug the number, because a
                     // row that started further right looked like a different kind
@@ -1197,7 +1205,9 @@ class MainActivity : ComponentActivity() {
                         }
                         FontStep("+", enabled = fontSize < 30f) { onFontSize(fontSize + 1f) }
                     }
-                    DropdownMenuItem({ Text(stringResource(R.string.discard)) }, onClick = { onDiscardRequest(); expanded = false })
+                    if (showingDoc) {
+                        DropdownMenuItem({ Text(stringResource(R.string.discard)) }, onClick = { onDiscardRequest(); expanded = false })
+                    }
                     DropdownMenuItem({ Text(stringResource(R.string.help)) }, onClick = { onHelpRequest(); expanded = false })
                     DropdownMenuItem({ Text(stringResource(R.string.about)) }, onClick = { about = true; expanded = false })
                 }
@@ -1214,9 +1224,9 @@ class MainActivity : ComponentActivity() {
      * vertically on it. The half-disc it replaced read as a tab, and the dots in
      * a row read as a horizontal "more" affordance.
      */
-    @Composable private fun CornerOverflow(expanded: Boolean, onOpen: () -> Unit, onDismiss: () -> Unit, menu: @Composable ColumnScope.() -> Unit) {
+    @Composable private fun CornerOverflow(expanded: Boolean, onOpen: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier, menu: @Composable ColumnScope.() -> Unit) {
         val moreLabel = stringResource(R.string.more_menu)
-        Box {
+        Box(modifier = modifier) {
             Surface(
                 modifier = Modifier.size(44.dp).clickable(onClick = onOpen).semantics { contentDescription = moreLabel },
                 shape = CircleShape,

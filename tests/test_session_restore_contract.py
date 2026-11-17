@@ -143,12 +143,19 @@ check("closing a tab releases its grant", "releasePermission(uri)" in body(MAIN,
 
 # --- A save clears the dirty flag only when the file holds the live text --
 check("saveToUri compares the written text with that tab's live text",
-      "vm.sameText(tabId, draft)" in save_to and "val tabId = vm.activeTabId" in save_to)
+      "vm.sameText(tabId, draft)" in save_to and "val tabId = takeSaveTabId()" in save_to and "vm.awaitTextOf(tabId)" in save_to)
 check("saveToUri clears dirty state only under the guard",
       "if (vm.sameText(tabId, draft)) vm.markClean(tabId)" in save_to and save_to.count("markClean(") == 1)
-check("saveAsToUri compares written text with live text", "vm.sameText(tabId, draft)" in save_as)
+check("saveAsToUri compares written text with live text",
+      "vm.sameText(tabId, draft)" in save_as and "val tabId = takeSaveTabId()" in save_as and "vm.awaitTextOf(tabId)" in save_as)
 check("failed Save As does not re-open the Save As prompt",
       "fallbackSaveAsAfterDenied" not in save_as and "R.string.save_failed" in save_as)
+check("pending save tab survives Activity recreation",
+      "onSaveInstanceState(" in MAIN and '"pending_save_tab_id"' in MAIN and 'pendingSaveTabId = savedInstanceState?.getString("pending_save_tab_id")' in on_create)
+check("unhydrated tabs never masquerade as empty and awaitTextOf hydrates stubs",
+      "it.id == tabId && it.hydrated" in VM and "suspend fun awaitTextOf(" in VM and "applyText(tab, loaded" in body(VM, "suspend fun awaitTextOf("))
+check("Save and Save As deduplicate tabs sharing the saved URI",
+      "dedupeSavedUri(tabId, uri)" in save_to and "dedupeSavedUri(tabId, uri)" in save_as)
 
 # --- Consumer-QA fixes that must not regress ------------------------------
 check("blank untitled document is not dirty", "tab.isDirty = tab.uri != null || text.isNotEmpty()" in VM)

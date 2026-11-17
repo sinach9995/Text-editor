@@ -45,8 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The tab strip: a pinned home tab, then one tab per open document, directly
- * under the header.
+ * The tab strip: one tab per open document, inside the header band.
  *
  * The home screen is not a tab. It used to be pinned at the head of the strip,
  * which cost a slot and pushed the open documents aside; the app icon in the
@@ -78,30 +77,26 @@ fun TabStrip(
     LaunchedEffect(activeIndex, tabs.size) {
         if (activeIndex >= 0) listState.animateScrollToItem(activeIndex)
     }
-    // The caller's modifier lands on the Surface, not on the inner Row: the
-    // header hands the strip a weight, and weight only means something to the
-    // parent that lays this composable out.
+    // The caller's modifier lands on the Surface, so weight applies to HeaderBar's Row.
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-        Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.Bottom) {
-            LazyRow(
-                modifier = Modifier.weight(1f).height(42.dp),
-                state = listState,
-                // No top padding: the active tab starts exactly where the
-                // header ends. The closed tabs are just 2dp shorter, so their
-                // gap reads as "not open" instead of pushing the row down.
-                contentPadding = PaddingValues(end = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                items(tabs, key = { it.id }) { tab ->
-                    TabChip(
-                        title = tab.title,
-                        dirty = tab.isDirty,
-                        active = !homeActive && tab.id == activeId,
-                        onSelect = { onSelect(tab.id) },
-                        onClose = { onClose(tab.id) },
-                    )
-                }
+        LazyRow(
+            modifier = Modifier.fillMaxWidth().height(42.dp),
+            state = listState,
+            // No top padding: the active tab starts exactly where the
+            // header ends. The closed tabs are just 2dp shorter, so their
+            // gap reads as "not open" instead of pushing the row down.
+            contentPadding = PaddingValues(end = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            items(tabs, key = { it.id }) { tab ->
+                TabChip(
+                    title = tab.title,
+                    dirty = tab.isDirty,
+                    active = !homeActive && tab.id == activeId,
+                    onSelect = { onSelect(tab.id) },
+                    onClose = { onClose(tab.id) },
+                )
             }
         }
     }
