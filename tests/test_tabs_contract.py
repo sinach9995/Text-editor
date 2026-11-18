@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "app/src/main/java/com/asoraksh/hermeseditor"
 MAIN = (SRC / "MainActivity.kt").read_text(encoding='utf-8')
+HEADER = (SRC / "HeaderBar.kt").read_text(encoding='utf-8')
 VM = (SRC / "EditorViewModel.kt").read_text(encoding='utf-8')
 STRIP = (SRC / "TabStrip.kt").read_text(encoding='utf-8') if (SRC / "TabStrip.kt").exists() else ""
 CONTROLS = (SRC / "EditorFloatingControls.kt").read_text(encoding='utf-8')
@@ -51,7 +52,7 @@ close_tab = body(VM, "fun closeTab(")
 switch_tab = body(VM, "fun switchTab(")
 close_ui = body(MAIN, "fun requestCloseTab(")
 new_ui = body(MAIN, "fun newFile(")
-header = body(MAIN, "private fun HeaderBar(")
+header = body(HEADER, "internal fun HeaderBar(")
 buttons = body(CONTROLS, "fun FloatingActions(")
 
 # --- Tab strip ------------------------------------------------------------
@@ -70,16 +71,15 @@ check("a title wider than the tab can be dragged sideways",
       "horizontalScroll(scroll)" in STRIP and "rememberTextMeasurer" in STRIP)
 # --- One band at the top (1.7) -------------------------------------------
 check("the header is a single band, not a title bar plus a strip",
-      "fun HeaderBar(" in MAIN and "fun TopBar(" not in MAIN)
+      "fun HeaderBar(" in HEADER and "fun TopBar(" not in MAIN)
 check("the band starts with the app icon", "R.drawable.hermes_editor_icon" in header)
 check("the band is one row of 52dp", "height(52.dp)" in header)
 check("the file name is no longer repeated above the tabs", "20.sp" not in header)
 check("tapping the icon goes home", "onHome" in header and ".clickable(onClick = onHome)" in header)
-# 1.7: a whole disc with the dots stacked, not a half disc with a row of dots.
 check("the menu is a whole disc in the corner",
-      "CornerOverflow(" in header and "shape = CircleShape" in MAIN
-      and "HalfDiscShape" not in MAIN)
-check("the menu dots run vertically", "verticalArrangement = Arrangement.spacedBy(4.dp)" in MAIN)
+      "CornerOverflow(" in header and "shape = CircleShape" in HEADER
+      and "HalfDiscShape" not in HEADER + MAIN)
+check("the menu dots run vertically", "verticalArrangement = Arrangement.spacedBy(4.dp)" in HEADER)
 check("strip closes with a dedicated hit target", "\"×\"" in STRIP and "onClose" in STRIP)
 check("strip scrolls and follows the active tab", "LazyRow" in STRIP and "animateScrollToItem(activeIndex)" in STRIP)
 check("strip is rendered inside the header", "TabStrip(" in header)
@@ -155,11 +155,11 @@ check("per-tab history is capped", "EditorHistory(maxEntries = 30, maxTotalChars
 # --- Font stepper ---------------------------------------------------------
 check("the header takes a font size", "fontSize: Float" in header and "onFontSize: (Float) -> Unit" in header)
 check("the font row starts in the same column as the others", "padding(start = 12.dp, end = 12.dp)" in header)
-check("the stepper hugs the number", "size(28.dp)" in MAIN and "width(28.dp)" in MAIN)
-check("the language row has no globe glyph", "LanguageGlyph" not in MAIN)
+check("the stepper hugs the number", "size(28.dp)" in HEADER and "width(28.dp)" in HEADER)
+check("the language row has no globe glyph", "LanguageGlyph" not in HEADER + MAIN)
 check("the theme icon trails its text", "trailingIcon" in header)
-check("the menu has minus and plus steps", "FontStep(\"−\"" in MAIN and "FontStep(\"+\"" in MAIN)
-check("the stepper disables at the ends", "enabled = fontSize > 13f" in MAIN and "enabled = fontSize < 30f" in MAIN)
+check("the menu has minus and plus steps", "FontStep(\"−\"" in HEADER and "FontStep(\"+\"" in HEADER)
+check("the stepper disables at the ends", "enabled = fontSize > 13f" in HEADER and "enabled = fontSize < 30f" in HEADER)
 check("a chosen size is persisted", 'prefs.edit().putFloat("document_font_size", fontSize).apply()' in MAIN)
 
 # --- Resources ------------------------------------------------------------
@@ -199,7 +199,7 @@ for _name in ("help_titles", "help_bodies"):
 # About must read the installed version, not a literal that drifts.
 check("About shows the installed version",
       "getPackageInfo(packageName, 0).versionName" in MAIN
-      and "stringResource(R.string.about_body, version)" in MAIN)
+      and "stringResource(R.string.about_body, versionName)" in HEADER)
 
 # --- The corner column (1.7) ----------------------------------------------
 check("the full-width bottom bar is gone", "ActionBar(" not in MAIN and "bottomBar =" not in MAIN)
@@ -281,9 +281,13 @@ check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)
 check("versionCode was bumped past 1.6.8", "versionCode = 16" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
-check("JVM tests cover the codec and the reader",
+check("JVM tests cover codec, reader, history, and anchors",
       (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/TabManifestCodecTest.kt").exists()
-      and (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/BoundedReaderTest.kt").exists())
+      and (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/BoundedReaderTest.kt").exists()
+      and (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/EditorHistoryTest.kt").exists()
+      and (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/DocumentAnchorsTest.kt").exists()
+      and not (ROOT / "tests/EditorHistoryTest.kt").exists()
+      and not (ROOT / "tests/DocumentAnchorsTest.kt").exists())
 
 if failures:
     print(f"\n{len(failures)} contract(s) failed")

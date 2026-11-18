@@ -45,19 +45,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The tab strip: one tab per open document, inside the header band.
+ * Horizontal document tab strip inside the header band.
  *
- * The home screen is not a tab. It used to be pinned at the head of the strip,
- * which cost a slot and pushed the open documents aside; the app icon in the
- * header is the way back to it instead, and the strip only ever holds documents.
- *
- * The active tab is a cut-out of the page, not a chip floating on the bar: it
- * takes the page colour, starts where the top bar ends, drops its bottom
- * corners for two concave feet that bend into the text below, and is drawn per
- * tab, so the feet travel with the tab as the strip scrolls.
- *
- * Deliberately thin: it renders [TabState] snapshots and reports intent, so all
- * the state lives in the ViewModel and none of it is duplicated here.
+ * The active tab uses [MergedTabShape] so its bottom corners flare smoothly onto the page edge.
  */
 @Composable
 fun TabStrip(
