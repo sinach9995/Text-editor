@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class TabManifestCodecTest {
@@ -104,5 +105,44 @@ class TabBudgetTest {
     fun `an empty tab set fits`() {
         assertTrue(TabBudget.canAddTab(emptyList()))
         assertEquals(0L, TabBudget.totalChars(emptyList()))
+    }
+}
+
+class HydrationPrecedenceTest {
+
+    @Test
+    fun `draft wins over file and marks dirty without reading file`() {
+        val res = resolveHydration("unsaved draft", hasUri = true) {
+            fail("backing file must not be read when a draft exists")
+            "from file"
+        }
+        assertEquals(HydratedText("unsaved draft", dirty = true), res)
+
+        val emptyDraft = resolveHydration("", hasUri = true) {
+            fail("empty draft still beats backing file")
+            "from file"
+        }
+        assertEquals(HydratedText("", dirty = true), emptyDraft)
+    }
+
+    @Test
+    fun `readable file is used when no draft exists and stays clean`() {
+        val res = resolveHydration(null, hasUri = true) { "from disk" }
+        assertEquals(HydratedText("from disk", dirty = false), res)
+    }
+
+    @Test
+    fun `unreadable file with no draft returns null`() {
+        val res = resolveHydration(null, hasUri = true) { null }
+        assertNull(res)
+    }
+
+    @Test
+    fun `untitled tab with no draft and no uri hydrates to clean empty string`() {
+        val res = resolveHydration(null, hasUri = false) {
+            fail("untitled tab has no backing file")
+            "unexpected"
+        }
+        assertEquals(HydratedText("", dirty = false), res)
     }
 }

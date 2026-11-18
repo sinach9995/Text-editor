@@ -21,10 +21,12 @@ class ViewportFollowup(unittest.TestCase):
         self.assertIn('onTextLayout =', text)
         main = (ROOT / 'MainActivity.kt').read_text(encoding='utf-8')
         self.assertIn('previewTextAnchors.capture(centroid)', main)
-    def test_history_is_overlay_not_bottom_bar_child(self):
+    def test_actions_are_an_overlay_not_a_bottom_bar_child(self):
+        # 1.7 removed the Scaffold bottomBar entirely; the whole stack is an
+        # overlay in the content box so no window inset can squeeze it.
         text = (ROOT / 'MainActivity.kt').read_text(encoding='utf-8')
-        bar = text.split('bottomBar = {', 1)[1].split('contentWindowInsets', 1)[0]
-        self.assertNotIn('FloatingHistory(', bar)
+        self.assertNotIn('bottomBar = {', text)
+        self.assertIn('FloatingActions(', text)
         self.assertIn('Modifier.align(Alignment.BottomEnd)', text)
     def test_pinch_has_exclusive_scroll_ownership(self):
         text = (ROOT / 'MainActivity.kt').read_text(encoding='utf-8')
@@ -33,9 +35,13 @@ class ViewportFollowup(unittest.TestCase):
         self.assertIn('cursorVisibilityRequest', text)
         preview = (ROOT / 'PreviewTextAnchors.kt').read_text(encoding='utf-8')
         self.assertIn('correctedLayout === layout', preview)
-    def test_action_label_and_arrow_are_centered_as_one_group(self):
+    def test_corner_buttons_are_glyphs_not_labels(self):
         text = (ROOT / 'MainActivity.kt').read_text(encoding='utf-8')
-        self.assertEqual(text.count('CombinedActionLabel(stringResource('), 2)
-        self.assertIn('Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center)', text)
-        self.assertIn('Spacer(Modifier.width(3.dp))', text)
+        controls = (ROOT / 'EditorFloatingControls.kt').read_text(encoding='utf-8')
+        self.assertNotIn('CombinedActionLabel', text)
+        self.assertIn('.size(DOT)', controls)
+        self.assertIn('private val DOT = 46.dp', controls)
+        self.assertIn('contentAlignment = Alignment.Center', controls)
+        self.assertIn('Canvas(modifier)', controls)
+        self.assertIn('CircleShape', controls)
 if __name__ == '__main__': unittest.main()

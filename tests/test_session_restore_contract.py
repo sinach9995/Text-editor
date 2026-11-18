@@ -52,6 +52,9 @@ save_to = body(MAIN, "private fun saveToUri(")
 save_as = body(MAIN, "private fun saveAsToUri(")
 open_doc = body(MAIN, "private val openDocument = registerForActivityResult")
 open_in = body(MAIN, "private fun openIncoming(")
+# 1.7: the picker and the share intent both hand the uri to openUri, so the
+# bounded-read contract is asserted on the one function they share.
+open_uri = body(MAIN, "private fun openUri(")
 restore_last = body(MAIN, "private fun restoreLastSession(")
 
 # --- The manifest replaces single-document identity ----------------------
@@ -77,7 +80,7 @@ check("restore persists the manifest it just built", "persistManifest()" in rest
 check("draft is read before the file", hydrate.find("draftFile(tab)") < hydrate.find("reader?.invoke(uri)"))
 check("a draft makes the tab dirty", "applyText(tab, draft, dirty = true)" in hydrate)
 check("a file read leaves the tab clean", "applyText(tab, text, dirty = false)" in hydrate)
-check("draft read is bounded", "BoundedReader.readText(file)" in body(VM, "private fun readDraft("))
+check("draft read is bounded", "BoundedReader.readText(file, DRAFT_MAX_BYTES)" in body(VM, "private fun readDraft("))
 check("file read is bounded", "runCatching { reader?.invoke(uri) }" in hydrate)
 check("a hydrate that lost its tab is dropped", "_tabs.contains(tab)" in hydrate)
 check("an unreadable uri degrades to untitled instead of crashing", "tab.title = UNTOOLED_TXT" in hydrate)
@@ -85,14 +88,14 @@ check("an unreadable uri degrades to untitled instead of crashing", "tab.title =
 # --- Every open path is bounded ------------------------------------------
 check("BoundedReader has a 5 MB ceiling", "MAX_BYTES: Int = 5 * 1024 * 1024" in BOUNDED)
 check("BoundedReader throws instead of truncating", "TooLargeException" in BOUNDED)
-check("OpenDocument is bounded", "BoundedReader.readText" in open_doc)
-check("the share intent path is bounded", "BoundedReader.readText" in open_in)
+check("the Open dialog is bounded", "openUri(it)" in open_doc and "BoundedReader.readText" in open_uri)
+check("the share intent path is bounded", "private fun openIncoming(uri: Uri) = openUri(uri)" in MAIN and "BoundedReader.readText" in open_uri)
 check("the cold-start read lambda is bounded", "BoundedReader.readText" in restore_last)
 check("a too-large file reports instead of silently failing",
-      open_doc.count("TooLargeException") >= 1 and open_in.count("TooLargeException") >= 1)
+      open_uri.count("TooLargeException") >= 1)
 check("no unbounded readText() call is left in the Activity",
       "bufferedReader(Charsets.UTF_8)?.use { r -> r.readText() }" not in MAIN)
-check("an already-open file is jumped to, not opened twice", "documentKey(" in open_doc and "vm.switchTab(existing.id)" in open_doc)
+check("an already-open file is jumped to, not opened twice", "documentKey(" in open_uri and "vm.switchTab(existing.id)" in open_uri)
 
 # --- Recovery draft lifecycle --------------------------------------------
 retire = body(VM, "private fun retireDraft(")
@@ -107,7 +110,8 @@ check("drafts are per tab", '"draft_${tab.id}.txt"' in VM)
 check("new tab flushes the outgoing draft", "scheduleFlush(activeTab)" in new_tab)
 check("switch flushes the outgoing draft", "scheduleFlush(activeTab)" in switch_tab)
 check("closing a tab retires its draft", "retireDraft(closing)" in close_tab)
-check("closing the last tab leaves a clean untitled tab", "if (_tabs.isEmpty())" in close_tab)
+check("closing the last tab leaves no document and shows Recent",
+      "if (_tabs.isEmpty())" in close_tab and "home = true" in close_tab)
 check("opening a document retires that tab's draft", "retireDraft(tab)" in set_doc)
 check("saving retires the draft", "retireDraft(tab)" in mark)
 check("retire bumps the epoch under the draft lock", "tab.draftEpoch++" in retire and "synchronized(draftLock)" in retire)
@@ -130,7 +134,7 @@ check("attachDraft keeps the v1.5 signature", "fun attachDraft(recoveryFile: Fil
 check("setDocument invalidates an in-flight hydrate", "tab.loadToken++" in set_doc)
 check("an incoming file opens beside the open documents, not over them",
       "openIncoming(uri)" in MAIN and "pendingIncoming" not in MAIN
-      and "vm.openInNewTab(uri, displayName(uri), text)" in MAIN)
+      and "vm.openInNewTab(target, displayName(target), text)" in open_uri)
 
 # --- Grants ---------------------------------------------------------------
 check("saveToUri persists the grant", "takePersistablePermissions(uri)" in save_to)
@@ -139,12 +143,27 @@ check("closing a tab releases its grant", "releasePermission(uri)" in body(MAIN,
 
 # --- A save clears the dirty flag only when the file holds the live text --
 check("saveToUri compares the written text with that tab's live text",
-      "vm.sameText(tabId, draft)" in save_to and "val tabId = vm.activeTabId" in save_to)
+      "vm.sameText(tabId, draft)" in save_to and "val tabId = takeSaveTabId()" in save_to and "vm.awaitTextOf(tabId)" in save_to)
 check("saveToUri clears dirty state only under the guard",
       "if (vm.sameText(tabId, draft)) vm.markClean(tabId)" in save_to and save_to.count("markClean(") == 1)
-check("saveAsToUri compares written text with live text", "vm.sameText(tabId, draft)" in save_as)
+check("saveAsToUri compares written text with live text",
+      "vm.sameText(tabId, draft)" in save_as and "val tabId = takeSaveTabId()" in save_as and "vm.awaitTextOf(tabId)" in save_as)
 check("failed Save As does not re-open the Save As prompt",
       "fallbackSaveAsAfterDenied" not in save_as and "R.string.save_failed" in save_as)
+check("pending save tab survives Activity recreation",
+      "onSaveInstanceState(" in MAIN and '"pending_save_tab_id"' in MAIN and 'pendingSaveTabId = savedInstanceState?.getString("pending_save_tab_id")' in on_create)
+check("unhydrated tabs never masquerade as empty and awaitTextOf hydrates stubs",
+      "it.id == tabId && it.hydrated" in VM and "fun textOf(" not in VM
+      and "suspend fun awaitTextOf(" in VM and "applyText(tab, resolved.text" in body(VM, "suspend fun awaitTextOf("))
+check("hydration precedence helper is tested in JUnit",
+      "HydrationPrecedenceTest" in (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/TabManifestCodecTest.kt").read_text(encoding='utf-8'))
+check("awaitTextOf failure notifies user of save failure across Save, Save As, and Export",
+      "notifyMessage(getString(R.string.save_failed))" in save_to
+      and "notifyMessage(getString(R.string.save_failed))" in save_as
+      and "notifyMessage(getString(R.string.save_failed))" in body(MAIN, "private val exportDocument ="))
+check("Save and Save As deduplicate tabs sharing the saved URI and notify when closed",
+      "dedupeSavedUri(tabId, uri)" in save_to and "dedupeSavedUri(tabId, uri)" in save_as
+      and "R.string.saved_deduped" in save_to and "R.string.saved_deduped" in save_as)
 
 # --- Consumer-QA fixes that must not regress ------------------------------
 check("blank untitled document is not dirty", "tab.isDirty = tab.uri != null || text.isNotEmpty()" in VM)
@@ -188,8 +207,8 @@ check("document operations take the tab id instead of resolving activeTab",
       "fun setDocument(tabId: String" in VM and "fun setDocumentUri(tabId: String" in VM
       and "fun renameTitle(tabId: String" in VM)
 check("open paths add a tab instead of replacing the active one",
-      "vm.openInNewTab(target, displayName(target), text)" in open_doc
-      and "vm.openInNewTab(uri, displayName(uri), text)" in open_in
+      "vm.openInNewTab(target, displayName(target), text)" in open_uri
+      and "vm.setDocument(tabId" not in open_uri
       and "vm.setDocument(tabId" not in open_doc and "vm.setDocument(tabId" not in open_in)
 check("a share on cold start rebuilds the tab strip before it is applied",
       MAIN.index("restoreLastSession(legacy, store)") < MAIN.index("if (incoming != null) handleIncomingIntent(incoming)"))

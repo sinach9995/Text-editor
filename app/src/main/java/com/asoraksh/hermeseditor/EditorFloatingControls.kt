@@ -2,8 +2,17 @@
 package com.asoraksh.hermeseditor
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,12 +58,153 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
     }
 }
 
-@Composable internal fun FloatingHistory(canUndo: Boolean, canRedo: Boolean, undo: () -> Unit, redo: () -> Unit) {
-    Surface(shape = RoundedCornerShape(24.dp), shadowElevation = 3.dp, tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Row(Modifier.padding(4.dp)) {
-            ControlButton(ControlIcon.Undo, stringResource(R.string.undo), canUndo, undo)
-            ControlButton(ControlIcon.Redo, stringResource(R.string.redo), canRedo, redo)
+/**
+ * The document actions, as a column in the bottom-right corner instead of a
+ * full-width bar along the bottom.
+ *
+ * A bar cost 60dp of height on every screen, all the time, for five actions that
+ * are used in bursts. A column costs the right edge, where there is no text to
+ * cover, and it is one-handed reach.
+ *
+ * The set is not fixed. While the keyboard is up, New and Open are hidden: they
+ * are not things you do mid-sentence, and they were the two buttons that pushed
+ * the column over the cursor. In landscape with the keyboard up there is no
+ * vertical room left at all, so the three that remain lie down in a row.
+ */
+// The dots are 15% larger than the first cut: at 40dp with a 22dp glyph the
+// column read as decoration rather than buttons on a tall phone.
+private val DOT = 46.dp
+private val GLYPH = 25.dp
+private val HISTORY_GLYPH = 23.dp
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable internal fun FloatingActions(
+    modifier: Modifier = Modifier,
+    inRow: Boolean,
+    showDocuments: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onSave: () -> Unit,
+    onSaveAs: () -> Unit,
+    onExport: () -> Unit,
+    onNew: () -> Unit,
+    onNewMarkdown: () -> Unit,
+    onOpen: () -> Unit,
+    undo: () -> Unit,
+    redo: () -> Unit,
+) {
+    var saveMenu by remember { mutableStateOf(false) }
+    var newMenu by remember { mutableStateOf(false) }
+    val gap = if (inRow) 11.dp else 9.dp
+    // One list of buttons, laid out either as a column or as a row.
+    val stack: @Composable () -> Unit = {
+        Box {
+            ActionDot(label = stringResource(R.string.ui_save), onClick = onSave, onLongClick = { saveMenu = true }) {
+                LineIcon(LineIconKind.Save, MaterialTheme.colorScheme.primary, Modifier.size(GLYPH))
+            }
+            // Save as / Export stay on a long press rather than taking two more
+            // slots: the common action is one tap on a document you already own.
+            DropdownMenu(saveMenu, onDismissRequest = { saveMenu = false }) {
+                DropdownMenuItem({ Text(stringResource(R.string.ui_save_as)) }, onClick = { saveMenu = false; onSaveAs() })
+                DropdownMenuItem({ Text(stringResource(R.string.ui_export_txt)) }, onClick = { saveMenu = false; onExport() })
+            }
+        }
+        if (showDocuments) {
+            Box {
+                ActionDot(label = stringResource(R.string.ui_new), onClick = onNew, onLongClick = { newMenu = true }) {
+                    LineIcon(LineIconKind.NewFile, MaterialTheme.colorScheme.primary, Modifier.size(GLYPH))
+                }
+                DropdownMenu(newMenu, onDismissRequest = { newMenu = false }) {
+                    DropdownMenuItem({ Text(stringResource(R.string.new_txt)) }, onClick = { newMenu = false; onNew() })
+                    DropdownMenuItem({ Text(stringResource(R.string.new_md)) }, onClick = { newMenu = false; onNewMarkdown() })
+                }
+            }
+            ActionDot(label = stringResource(R.string.ui_open), onClick = onOpen) {
+                LineIcon(LineIconKind.OpenFolder, MaterialTheme.colorScheme.primary, Modifier.size(GLYPH))
+            }
+        }
+        ActionDot(label = stringResource(R.string.undo), enabled = canUndo, onClick = undo) {
+            Icon(remember { vector(ControlIcon.Undo) }, null, Modifier.size(HISTORY_GLYPH), tint = tintFor(canUndo))
+        }
+        ActionDot(label = stringResource(R.string.redo), enabled = canRedo, onClick = redo) {
+            Icon(remember { vector(ControlIcon.Redo) }, null, Modifier.size(HISTORY_GLYPH), tint = tintFor(canRedo))
+        }
+    }
+    // Order is deliberate: Save at the top of the stack and Redo at the bottom,
+    // so the thumb falling on the corner hits Redo last and Save first.
+    if (inRow) Row(modifier, horizontalArrangement = Arrangement.spacedBy(gap)) { stack() }
+    else Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) { stack() }
+}
+
+@Composable private fun tintFor(enabled: Boolean) =
+    if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable private fun ActionDot(
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
+        shadowElevation = 3.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(DOT)
+                .combinedClickable(enabled = enabled, onLongClick = onLongClick, onClick = onClick)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) { content() }
+    }
+}
+
+/** The three document icons, drawn as lines so they read as one family at 22dp. */
+internal enum class LineIconKind { NewFile, OpenFolder, Save }
+
+@Composable internal fun LineIcon(kind: LineIconKind, tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val s = size.minDimension / 24f
+        val w = 1.7.dp.toPx()
+        val stroke = Stroke(width = w, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        fun o(x: Float, y: Float) = Offset(x * s, y * s)
+        // Flat coordinate pairs, so the call sites read as a path rather than a
+        // wall of `x to y`.
+        fun poly(vararg xy: Float) {
+            val path = Path()
+            var i = 0
+            while (i + 1 < xy.size) {
+                if (i == 0) path.moveTo(xy[i] * s, xy[i + 1] * s)
+                else path.lineTo(xy[i] * s, xy[i + 1] * s)
+                i += 2
+            }
+            drawPath(path, tint, style = stroke)
+        }
+        when (kind) {
+            // A whole page with a folded corner and a plus inside it. The
+            // earlier cut notched the page's foot to fit the plus outside, and
+            // at real size that gap read as a broken rectangle.
+            LineIconKind.NewFile -> {
+                poly(4f, 3f, 15f, 3f, 20f, 8f, 20f, 21f, 4f, 21f, 4f, 3f)
+                poly(15f, 3f, 15f, 8f, 20f, 8f)
+                drawLine(tint, o(12f, 9.5f), o(12f, 17.5f), w, StrokeCap.Round)
+                drawLine(tint, o(8f, 13.5f), o(16f, 13.5f), w, StrokeCap.Round)
+            }
+            // Folder with an open lid.
+            LineIconKind.OpenFolder -> {
+                poly(3f, 19f, 3f, 6f, 10f, 6f, 12f, 9f, 21f, 9f, 21f, 19f, 3f, 19f)
+                poly(3f, 12f, 21f, 12f)
+            }
+            // Floppy: body, shutter and label.
+            LineIconKind.Save -> {
+                poly(4f, 4f, 16f, 4f, 20f, 8f, 20f, 20f, 4f, 20f, 4f, 4f)
+                poly(8f, 4f, 8f, 9f, 15f, 9f, 15f, 4f)
+                poly(8f, 20f, 8f, 14f, 16f, 14f, 16f, 20f)
+            }
         }
     }
 }

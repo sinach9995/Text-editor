@@ -18,6 +18,26 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+internal data class HydratedText(val text: String, val dirty: Boolean)
+
+/**
+ * Pure hydration precedence:
+ *  1. Recovery draft wins over backing file and marks the tab dirty.
+ *  2. No draft + no URI = clean empty untitled buffer.
+ *  3. No draft + readable URI = clean file buffer (readUri runs only when draft == null).
+ *  4. No draft + unreadable URI = null.
+ */
+internal inline fun resolveHydration(
+    draft: String?,
+    hasUri: Boolean,
+    readUri: () -> String?,
+): HydratedText? {
+    if (draft != null) return HydratedText(draft, dirty = true)
+    if (!hasUri) return HydratedText("", dirty = false)
+    val text = readUri() ?: return null
+    return HydratedText(text, dirty = false)
+}
+
 /**
  * One open document plus everything the editor surface needs when it becomes
  * the active tab.
@@ -110,13 +130,40 @@ class EditorViewModel : ViewModel() {
         private set
 
     /**
-     * The active tab. Always valid: a share intent can arrive before any restore
-     * ran, and the editor must never render "no document".
+     * Whether the Recent page is the visible page. Independent of [tabs]: the
+     * home tab can be shown while documents stay open behind it, which is what
+     * makes the app icon a way back to the list instead of a "close everything".
+     */
+    var home: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * The active tab. Detached when nothing is open: the Recent page can be on
+     * screen with an empty tab list, and a reader of this property must not be
+     * able to bring a document back to life by touching it.
      */
     val activeTab: TabState
         get() = _tabs.firstOrNull { it.id == activeTabId }
             ?: _tabs.firstOrNull()
-            ?: TabState(TAB_1).also { _tabs.add(it); activeTabId = it.id }
+            ?: TabState(TAB_1)
+
+    /**
+     * Show the Recent page without touching the open documents.
+     *
+     * No session bump: a bump tells the editor this is a new document session,
+     * which drops its find state and anchors and takes a pending scroll target,
+     * so coming back from Recent landed at a position the model had discarded.
+     * The page is an overlay, not a document change.
+     */
+    fun goHome() {
+        if (_tabs.isNotEmpty()) scheduleFlush(activeTab)
+        home = true
+    }
+
+    /** Leave the Recent page without changing which document is open. */
+    fun showDocument() {
+        home = false
+    }
 
     // --- v1.5-compatible surface, delegated to the active tab -------------
 
@@ -216,6 +263,7 @@ class EditorViewModel : ViewModel() {
     /** Returns false when the tab limit or the text budget refuses a new tab. */
     fun newTab(markdown: Boolean): Boolean {
         if (!canOpenAnotherTab()) return false
+        home = false
         val tab = TabState(nextId())
         tab.title = if (markdown) UNTOOLED_MD else UNTOOLED_TXT
         tab.hydrated = true
@@ -236,6 +284,9 @@ class EditorViewModel : ViewModel() {
      * after a save or a close.
      */
     fun switchTab(id: String): Boolean {
+        // Tapping the tab that is already active still has to leave the Recent
+        // page, otherwise the first tap after the icon does nothing.
+        showDocument()
         if (id == activeTabId) return true
         val target = _tabs.firstOrNull { it.id == id } ?: return false
         scheduleFlush(activeTab)
@@ -248,8 +299,8 @@ class EditorViewModel : ViewModel() {
 
     /**
      * Removes a tab. The caller has already confirmed the discard when it was
-     * dirty. Closing the last tab leaves one clean untitled tab behind, so the
-     * editor never has to render "no document".
+     * dirty. Closing the last tab lands on the Recent page with an empty strip:
+     * a state the UI renders, not one it has to work around.
      */
     fun closeTab(id: String): Boolean {
         val index = _tabs.indexOfFirst { it.id == id }
@@ -258,11 +309,10 @@ class EditorViewModel : ViewModel() {
         retireDraft(closing)
         _tabs.removeAt(index)
         if (_tabs.isEmpty()) {
-            val fresh = TabState(nextId())
-            fresh.hydrated = true
-            fresh.fresh = true
-            _tabs.add(fresh)
-            activeTabId = fresh.id
+            // Closing the last document lands on the Recent tab instead of
+            // spawning a blank document the user never asked for.
+            activeTabId = ""
+            home = true
         } else if (activeTabId == id) {
             val next = _tabs[index.coerceAtMost(_tabs.lastIndex)]
             activeTabId = next.id
@@ -312,7 +362,9 @@ class EditorViewModel : ViewModel() {
 
     fun persistManifest(sync: Boolean = false) {
         val s = store ?: return
-        if (_tabs.isEmpty()) return
+        // Nothing open: drop the manifest rather than leave the closed tabs on
+        // disk to be reopened on the next launch.
+        if (_tabs.isEmpty()) { s.clearManifest(); return }
         s.saveManifest(TabManifest(records(), activeTabId), sync)
     }
 
@@ -332,12 +384,12 @@ class EditorViewModel : ViewModel() {
      */
     private fun readDraft(tab: TabState): String? {
         draftFile(tab)?.takeIf { it.exists() }?.let { file ->
-            runCatching { BoundedReader.readText(file) }.getOrNull()?.let { return it }
+            runCatching { BoundedReader.readText(file, DRAFT_MAX_BYTES) }.getOrNull()?.let { return it }
         }
         val legacyFile = legacyDraftFile
         val carried = pendingLegacyText ?: legacyFile
             ?.takeIf { it.exists() }
-            ?.let { file -> runCatching { BoundedReader.readText(file) }.getOrNull() }
+            ?.let { file -> runCatching { BoundedReader.readText(file, DRAFT_MAX_BYTES) }.getOrNull() }
         if (carried != null) {
             writeDraft(tab, carried, tab.draftEpoch)
             if (legacyFile != null && legacyFile != draftFile(tab) && legacyFile.exists()) {
@@ -374,6 +426,14 @@ class EditorViewModel : ViewModel() {
         restored = true
 
         val manifest = store?.loadManifest()
+        // Nothing remembered and no legacy recovery file: there is no document
+        // to reopen, so the session starts on the Recent tab instead of inventing
+        // an empty one.
+        if (manifest == null && legacyDraft.isNullOrEmpty() && lastUri == null) {
+            store?.clearLegacyDocument()
+            home = true
+            return
+        }
         val records: List<TabRecord> = manifest?.tabs ?: listOf(
             TabManifestCodec.migrate(
                 legacyUri = lastUri?.toString(),
@@ -394,7 +454,11 @@ class EditorViewModel : ViewModel() {
             tab.scrollY = record.scrollY
             _tabs.add(tab)
         }
-        if (_tabs.isEmpty()) _tabs.add(TabState(TAB_1))
+        if (_tabs.isEmpty()) {
+            restored = true
+            home = true
+            return
+        }
         activeTabId = manifest?.activeTabId?.takeIf { id -> _tabs.any { it.id == id } } ?: _tabs.first().id
 
         // v1.5 kept unsaved text in ONE recovery file (filesDir/draft.txt) and
@@ -519,12 +583,13 @@ class EditorViewModel : ViewModel() {
      * (the caller then leaves both the strip and the file untouched).
      */
     fun openInNewTab(uri: Uri?, newTitle: String, text: String): String? {
-        if (!canOpenAnotherTab()) return null
+        if (!TabBudget.canAccept(records(), text.length)) return null
         val tab = TabState(nextId())
         tab.hydrated = true
         scheduleFlush(activeTab)
         _tabs.add(tab)
         activeTabId = tab.id
+        home = false
         setDocument(tab.id, uri, newTitle, text)
         return tab.id
     }
@@ -550,11 +615,38 @@ class EditorViewModel : ViewModel() {
      * and a replaced uri used to keep its grant for the life of the process.
      */
     /** True when [text] is still exactly what [tabId] holds (a save raced the keyboard). */
-    /** The text a tab holds right now, or null when it is gone. */
-    fun textOf(tabId: String): String? = _tabs.firstOrNull { it.id == tabId }?.editor?.text
-
     fun sameText(tabId: String, text: String): Boolean =
-        _tabs.firstOrNull { it.id == tabId }?.editor?.text == text
+        _tabs.firstOrNull { it.id == tabId && it.hydrated }?.editor?.text == text
+
+    /**
+     * Returns [tabId]'s real text, hydrating its stub first if process death
+     * recreated the Activity while a system CreateDocument picker was open.
+     */
+    suspend fun awaitTextOf(tabId: String): String? {
+        val tab = _tabs.firstOrNull { it.id == tabId } ?: return null
+        if (tab.hydrated) return tab.editor.text
+        val draft = withContext(Dispatchers.IO) { readDraft(tab) }
+        if (!_tabs.contains(tab)) return null
+        if (tab.hydrated) return tab.editor.text
+        val uri = tab.uri
+        val resolved = resolveHydration(draft, uri != null) {
+            val u = uri!!
+            withContext(Dispatchers.IO) { runCatching { reader?.invoke(u) }.getOrNull() }
+        } ?: return null
+        if (!_tabs.contains(tab)) return null
+        if (!tab.hydrated) {
+            tab.loadToken++
+            tab.loading = false
+            applyText(tab, resolved.text, dirty = resolved.dirty)
+            if (draft != null) {
+                pendingLegacyText = null
+                legacyDraftFile = null
+            }
+            bumpSession()
+            persistManifest()
+        }
+        return tab.editor.text
+    }
 
     private fun replaceUri(tab: TabState, uri: Uri?) {
         val old = tab.uri
@@ -572,6 +664,10 @@ class EditorViewModel : ViewModel() {
     }
 
     fun onTextChanged(newValue: TextFieldValue, allowCoalescing: Boolean) {
+        // With no tab open, activeTab is a detached placeholder: recording an
+        // edit here wrote draft_tab_1.txt for a document nobody can see, and the
+        // next tab to take that id adopted the text.
+        if (_tabs.isEmpty()) return
         val tab = activeTab
         val changed = newValue.text != tab.editor.text
         tab.history.record(snapshotOf(tab), of(newValue), android.os.SystemClock.uptimeMillis(), allowCoalescing = allowCoalescing)
@@ -621,6 +717,7 @@ class EditorViewModel : ViewModel() {
             val file = draftFile(tab) ?: return
             if (epoch != tab.draftEpoch) return
             runCatching {
+                if (text.toByteArray(Charsets.UTF_8).size > DRAFT_MAX_BYTES) return
                 // Temp file + rename: a process kill mid-write must not truncate the draft.
                 val tmp = File(file.parentFile, file.name + ".tmp")
                 tmp.writeText(text, Charsets.UTF_8)
@@ -686,5 +783,15 @@ class EditorViewModel : ViewModel() {
         const val UNTOOLED_MD = "untitled.md"
         const val TAB_1 = "tab_1"
         private const val AUTOSAVE_DEBOUNCE_MS = 500L
+
+        /**
+         * The draft ceiling, used on both sides of the write.
+         *
+         * It used to be BoundedReader.MAX_BYTES on read and unbounded on write:
+         * text pasted past 5 MB was written, then refused on the next start, so
+         * the edits a draft exists to protect were the ones it dropped. Writing
+         * now refuses exactly what reading refuses.
+         */
+        private const val DRAFT_MAX_BYTES = 16 * 1024 * 1024
     }
 }
