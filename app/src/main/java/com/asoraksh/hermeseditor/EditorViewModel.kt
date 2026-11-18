@@ -18,6 +18,26 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+internal data class HydratedText(val text: String, val dirty: Boolean)
+
+/**
+ * Pure hydration precedence:
+ *  1. Recovery draft wins over backing file and marks the tab dirty.
+ *  2. No draft + no URI = clean empty untitled buffer.
+ *  3. No draft + readable URI = clean file buffer (readUri runs only when draft == null).
+ *  4. No draft + unreadable URI = null.
+ */
+internal inline fun resolveHydration(
+    draft: String?,
+    hasUri: Boolean,
+    readUri: () -> String?,
+): HydratedText? {
+    if (draft != null) return HydratedText(draft, dirty = true)
+    if (!hasUri) return HydratedText("", dirty = false)
+    val text = readUri() ?: return null
+    return HydratedText(text, dirty = false)
+}
+
 /**
  * One open document plus everything the editor surface needs when it becomes
  * the active tab.
@@ -594,10 +614,6 @@ class EditorViewModel : ViewModel() {
      * refers to it. Persistable grants are a limited resource (~128 per app)
      * and a replaced uri used to keep its grant for the life of the process.
      */
-    /** The text a tab holds right now, or null when it is gone or not yet hydrated. */
-    fun textOf(tabId: String): String? =
-        _tabs.firstOrNull { it.id == tabId && it.hydrated }?.editor?.text
-
     /** True when [text] is still exactly what [tabId] holds (a save raced the keyboard). */
     fun sameText(tabId: String, text: String): Boolean =
         _tabs.firstOrNull { it.id == tabId && it.hydrated }?.editor?.text == text
@@ -613,14 +629,15 @@ class EditorViewModel : ViewModel() {
         if (!_tabs.contains(tab)) return null
         if (tab.hydrated) return tab.editor.text
         val uri = tab.uri
-        val loaded = draft ?: if (uri == null) "" else {
-            withContext(Dispatchers.IO) { runCatching { reader?.invoke(uri) }.getOrNull() } ?: return null
-        }
+        val resolved = resolveHydration(draft, uri != null) {
+            val u = uri!!
+            withContext(Dispatchers.IO) { runCatching { reader?.invoke(u) }.getOrNull() }
+        } ?: return null
         if (!_tabs.contains(tab)) return null
         if (!tab.hydrated) {
             tab.loadToken++
             tab.loading = false
-            applyText(tab, loaded, dirty = draft != null)
+            applyText(tab, resolved.text, dirty = resolved.dirty)
             if (draft != null) {
                 pendingLegacyText = null
                 legacyDraftFile = null

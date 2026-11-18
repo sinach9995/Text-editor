@@ -87,6 +87,7 @@
     </string-array>
     <string name="saved">Saved: %1$s</string>
     <string name="saved_copy">Saved copy: %1$s</string>
+    <string name="saved_deduped">Saved: %1$s (closed duplicate tab)</string>
     <string name="exported">Exported: %1$s</string>
     <string name="save_failed">Could not save this file. Use Save as… to create a copy.</string>
     <string name="undo">Undo</string>

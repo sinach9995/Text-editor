@@ -87,6 +87,7 @@
     </string-array>
     <string name="saved">ذخیره شد: %1$s</string>
     <string name="saved_copy">نسخهٔ کپی ذخیره شد: %1$s</string>
+    <string name="saved_deduped">ذخیره شد: %1$s (زبانهٔ تکراری بسته شد)</string>
     <string name="exported">خروجی ساخته شد: %1$s</string>
     <string name="save_failed">این فایل ذخیره نشد. برای ساختن یک کپی، از ذخیره با نام دیگر… استفاده کنید.</string>
     <string name="undo">بازگرداندن</string>

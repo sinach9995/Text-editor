@@ -153,9 +153,17 @@ check("failed Save As does not re-open the Save As prompt",
 check("pending save tab survives Activity recreation",
       "onSaveInstanceState(" in MAIN and '"pending_save_tab_id"' in MAIN and 'pendingSaveTabId = savedInstanceState?.getString("pending_save_tab_id")' in on_create)
 check("unhydrated tabs never masquerade as empty and awaitTextOf hydrates stubs",
-      "it.id == tabId && it.hydrated" in VM and "suspend fun awaitTextOf(" in VM and "applyText(tab, loaded" in body(VM, "suspend fun awaitTextOf("))
-check("Save and Save As deduplicate tabs sharing the saved URI",
-      "dedupeSavedUri(tabId, uri)" in save_to and "dedupeSavedUri(tabId, uri)" in save_as)
+      "it.id == tabId && it.hydrated" in VM and "fun textOf(" not in VM
+      and "suspend fun awaitTextOf(" in VM and "applyText(tab, resolved.text" in body(VM, "suspend fun awaitTextOf("))
+check("hydration precedence helper is tested in JUnit",
+      "HydrationPrecedenceTest" in (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/TabManifestCodecTest.kt").read_text(encoding='utf-8'))
+check("awaitTextOf failure notifies user of save failure across Save, Save As, and Export",
+      "notifyMessage(getString(R.string.save_failed))" in save_to
+      and "notifyMessage(getString(R.string.save_failed))" in save_as
+      and "notifyMessage(getString(R.string.save_failed))" in body(MAIN, "private val exportDocument ="))
+check("Save and Save As deduplicate tabs sharing the saved URI and notify when closed",
+      "dedupeSavedUri(tabId, uri)" in save_to and "dedupeSavedUri(tabId, uri)" in save_as
+      and "R.string.saved_deduped" in save_to and "R.string.saved_deduped" in save_as)
 
 # --- Consumer-QA fixes that must not regress ------------------------------
 check("blank untitled document is not dirty", "tab.isDirty = tab.uri != null || text.isNotEmpty()" in VM)

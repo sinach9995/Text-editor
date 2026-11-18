@@ -234,7 +234,10 @@ class MainActivity : ComponentActivity() {
         val target = uri ?: run { pendingSaveTabId = null; return@registerForActivityResult }
         val tabId = takeSaveTabId()
         lifecycleScope.launch {
-            val raw = vm.awaitTextOf(tabId) ?: return@launch
+            val raw = vm.awaitTextOf(tabId) ?: run {
+                notifyMessage(getString(R.string.save_failed))
+                return@launch
+            }
             val plain = markdownToPlainText(raw)
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
@@ -331,7 +334,7 @@ class MainActivity : ComponentActivity() {
     // A share and the Open dialog are the same operation once the uri is here:
     // one dedupe rule, one read, one recency entry.
     private fun openIncoming(uri: Uri) = openUri(uri)
-    private fun dedupeSavedUri(ownerTabId: String, uri: Uri) {
+    private fun dedupeSavedUri(ownerTabId: String, uri: Uri): Boolean {
         val key = documentKey(uri)
         val duplicates = vm.tabs.filter { tab ->
             tab.id != ownerTabId && tab.uri?.let { it == uri || documentKey(it) == key } == true
@@ -339,6 +342,7 @@ class MainActivity : ComponentActivity() {
         for (dup in duplicates) {
             if (dup.isDirty) vm.setDocumentUri(dup.id, null) else vm.closeTab(dup.id)
         }
+        return duplicates.isNotEmpty()
     }
 
     private fun saveToUri(uri: Uri) {
@@ -350,7 +354,10 @@ class MainActivity : ComponentActivity() {
         // file cannot be reopened after process death.
         takePersistablePermissions(uri)
         lifecycleScope.launch {
-            val draft = vm.awaitTextOf(tabId) ?: return@launch
+            val draft = vm.awaitTextOf(tabId) ?: run {
+                notifyMessage(getString(R.string.save_failed))
+                return@launch
+            }
             val result: Result<Unit> = withContext(Dispatchers.IO) {
                 runCatching {
                     requireNotNull(contentResolver.openOutputStream(uri, "wt"))
@@ -364,14 +371,14 @@ class MainActivity : ComponentActivity() {
                 fallbackSaveAsAfterDenied(failure)
             } else {
                 vm.setDocumentUri(tabId, uri)
-                dedupeSavedUri(tabId, uri)
+                val deduped = dedupeSavedUri(tabId, uri)
                 vm.renameTitle(tabId, displayName(uri))
                 // Text typed while the write was in flight is not in the file.
                 // Clearing the dirty flag and retiring the recovery draft here
                 // would report it saved and drop the only copy of those keys.
                 if (vm.sameText(tabId, draft)) vm.markClean(tabId)
                 rememberRecent(uri, displayName(uri))
-                notifyMessage(getString(R.string.saved, displayName(uri)))
+                notifyMessage(getString(if (deduped) R.string.saved_deduped else R.string.saved, displayName(uri)))
             }
         }
     }
@@ -379,7 +386,10 @@ class MainActivity : ComponentActivity() {
         val tabId = takeSaveTabId()
         takePersistablePermissions(uri)
         lifecycleScope.launch {
-            val draft = vm.awaitTextOf(tabId) ?: return@launch
+            val draft = vm.awaitTextOf(tabId) ?: run {
+                notifyMessage(getString(R.string.save_failed))
+                return@launch
+            }
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     requireNotNull(contentResolver.openOutputStream(uri, "wt"))
@@ -388,13 +398,13 @@ class MainActivity : ComponentActivity() {
             }
             if (ok) {
                 vm.setDocumentUri(tabId, uri)
-                dedupeSavedUri(tabId, uri)
+                val deduped = dedupeSavedUri(tabId, uri)
                 vm.renameTitle(tabId, displayName(uri))
                 // Same guard as saveToUri: only retire the draft when the file
                 // holds exactly the text on screen.
                 if (vm.sameText(tabId, draft)) vm.markClean(tabId)
                 rememberRecent(uri, displayName(uri))
-                notifyMessage(getString(R.string.saved_copy, displayName(uri)))
+                notifyMessage(getString(if (deduped) R.string.saved_deduped else R.string.saved_copy, displayName(uri)))
             } else {
                 // The picked target failed for an unknown reason; "read-only" plus
                 // another Save As prompt would misdiagnose it and loop.
