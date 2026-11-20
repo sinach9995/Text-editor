@@ -103,7 +103,7 @@
     <string name="new_md">فایل Markdown جدید (.md)</string>
     <string name="onboarding_title">راهنمای شروع</string>
     <string name="onboarding_new_title">جدید</string>
-    <string name="onboarding_new_body">برای باز کردن تب متنی جدید روی دکمهٔ صفحه و بعلاوه در گوشه بزنید. برای انتخاب فایل متنی یا Markdown، آن را نگه دارید.</string>
+    <string name="onboarding_new_body">در صفحهٔ اخیر روی جدید بزنید یا در تب باز از دکمهٔ صفحه و بعلاوه در گوشه استفاده کنید. برای انتخاب فایل متنی یا Markdown، دکمهٔ گوشه را نگه دارید.</string>
     <string name="onboarding_save_title">ذخیره</string>
     <string name="onboarding_save_body">برای ذخیرهٔ تب فعلی روی دکمهٔ فلاپی در گوشه بزنید. برای ذخیره با نام دیگر و گزینه‌های خروجی، آن را نگه دارید.</string>
     <string name="onboarding_history_title">بازگرداندن و تکرار تغییر</string>

@@ -11,11 +11,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -25,16 +28,42 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 
 /** Full-screen Help overlay that keeps the editor composed underneath so scroll and selection survive. */
 @Composable
-internal fun HelpPage(isRtl: Boolean, onClose: () -> Unit, onReplayIntro: () -> Unit) {
+internal fun HelpPage(
+    isRtl: Boolean,
+    isLight: Boolean = false,
+    onClose: () -> Unit,
+    onReplayIntro: () -> Unit,
+) {
     val titles = stringArrayResource(R.array.help_titles)
     val bodies = stringArrayResource(R.array.help_bodies)
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            dialogWindow?.let { w ->
+                @Suppress("DEPRECATION")
+                w.statusBarColor = android.graphics.Color.TRANSPARENT
+                @Suppress("DEPRECATION")
+                w.navigationBarColor = android.graphics.Color.TRANSPARENT
+                WindowCompat.setDecorFitsSystemWindows(w, false)
+                w.setDimAmount(0f)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    w.isStatusBarContrastEnforced = false
+                    w.isNavigationBarContrastEnforced = false
+                }
+                WindowCompat.getInsetsController(w, w.decorView).apply {
+                    isAppearanceLightStatusBars = isLight
+                    isAppearanceLightNavigationBars = isLight
+                }
+            }
+        }
         CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Column(Modifier.fillMaxSize().safeDrawingPadding()) {

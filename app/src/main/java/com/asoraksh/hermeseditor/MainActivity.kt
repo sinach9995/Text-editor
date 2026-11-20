@@ -59,8 +59,15 @@ import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("hermes_editor", MODE_PRIVATE) }
@@ -346,6 +353,7 @@ class MainActivity : ComponentActivity() {
                 else fallbackSaveAsAfterDenied(failure)
             } else {
                 val name = displayName(uri)
+                val hadUri = vm.tabs.firstOrNull { it.id == tabId }?.uri != null
                 vm.setDocumentUri(tabId, uri)
                 val deduped = dedupeSavedUri(tabId, uri)
                 vm.renameTitle(tabId, name)
@@ -354,7 +362,7 @@ class MainActivity : ComponentActivity() {
                 rememberRecent(uri, name)
                 notifyMessage(getString(when {
                     deduped -> R.string.saved_deduped
-                    saveAs -> R.string.saved_copy
+                    saveAs && hadUri -> R.string.saved_copy
                     else -> R.string.saved
                 }, name))
             }
@@ -446,6 +454,8 @@ class MainActivity : ComponentActivity() {
         }
         val snackbar = remember { SnackbarHostState() }
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        val editorFocus = remember { FocusRequester() }
+        val keyboardController = LocalSoftwareKeyboardController.current
         var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
         var finding by rememberSaveable { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
@@ -464,7 +474,8 @@ class MainActivity : ComponentActivity() {
         previewTextAnchors.onCorrection = { delta -> previewScroll.dispatchRawDelta(delta) }
         val scope = rememberCoroutineScope()
         val density = LocalDensity.current
-        val textTop = with(density) { 20.dp.toPx() }
+        val topPad = if (finding) 76.dp else 20.dp
+        val textTop = with(density) { topPad.toPx() }
         val previewTop = with(density) { 16.dp.toPx() }
         var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
@@ -817,6 +828,20 @@ class MainActivity : ComponentActivity() {
                 dirSuggest = null
             }
         }
+        val isLightTheme = selectedTheme == AppTheme.LIGHT
+        SideEffect {
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = isLightTheme
+                isAppearanceLightNavigationBars = isLightTheme
+            }
+        }
+        LaunchedEffect(vm.home) {
+            if (vm.home) {
+                finding = false
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+        }
         MaterialTheme(colorScheme = colors) {
             val versionName = remember {
                 try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7.0" } catch (_: Exception) { "1.7.0" }
@@ -857,7 +882,11 @@ class MainActivity : ComponentActivity() {
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
-                Box(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding).onSizeChanged { viewportHeight = it.height }) {
+                Box(
+                    Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
+                        .onSizeChanged { viewportHeight = it.height }
+                        .then(if (vm.home) Modifier.clearAndSetSemantics { } else Modifier)
+                ) {
                 val docDirection = if (docRtl) TextDirection.Rtl else TextDirection.Ltr
                 val docAlign = if (docRtl) TextAlign.Right else TextAlign.Left
                 if (isMarkdownName(title) && mdPreview) {
@@ -896,12 +925,19 @@ class MainActivity : ComponentActivity() {
                         }
                     ) {
                     Box(Modifier.fillMaxSize().clipToBounds().documentPinchZoom(zoomDocument, startPinch, endPinch)
+                        .pointerInput(Unit) {
+                            detectTapGestures {
+                                editorFocus.requestFocus()
+                                keyboardController?.show()
+                            }
+                        }
                         .verticalScroll(editorScroll).padding(horizontal = 20.dp)
                         // Room for the corner buttons: 5 stacked dots when closed,
                         // 1 compact horizontal row when the keyboard is open.
-                        .padding(top = 20.dp, bottom = if (imeBottom == 0) 280.dp else 70.dp)) {
+                        .padding(top = topPad, bottom = if (imeBottom == 0) 280.dp else 70.dp)) {
                     BasicTextField(
                         value = editor,
+                        enabled = !vm.home,
                         onValueChange = { newValue ->
                             vm.onTextChanged(newValue, allowCoalescing = !pastedEdit)
                             pastedEdit = false
@@ -920,6 +956,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onTextLayout = { textLayout = it },
                         modifier = Modifier.fillMaxWidth()
+                            .focusRequester(editorFocus)
                             .onFocusChanged { editorFocused = it.isFocused }
                             .bringIntoViewRequester(cursorRequester)
                             .onSizeChanged { sourceContentSize = it }
@@ -966,7 +1003,7 @@ class MainActivity : ComponentActivity() {
                 // strip from the text. They are hidden behind Find and Markdown
                 // preview, where they would either cover the document or do
                 // nothing useful.
-                if (!finding && !mdPreview) {
+                if (!finding && !mdPreview && !vm.home) {
                     FloatingActions(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 10.dp),
                         inRow = imeBottom > 0,
@@ -1048,6 +1085,7 @@ class MainActivity : ComponentActivity() {
             )
             if (showHelp) HelpPage(
                 isRtl = lang == "fa",
+                isLight = isLightTheme,
                 onClose = { showHelp = false },
                 onReplayIntro = {
                     showHelp = false

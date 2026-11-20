@@ -103,7 +103,7 @@
     <string name="new_md">New Markdown file (.md)</string>
     <string name="onboarding_title">Getting started</string>
     <string name="onboarding_new_title">New</string>
-    <string name="onboarding_new_body">Tap the page-plus button in the corner to open a new text tab. Hold it to choose a Text or Markdown file.</string>
+    <string name="onboarding_new_body">Tap New on the Recent screen, or the page-plus button in the corner of any open tab. Hold the corner button to choose a Text or Markdown file.</string>
     <string name="onboarding_save_title">Save</string>
     <string name="onboarding_save_body">Tap the floppy button in the corner to save the current tab. Hold it for Save as and export options.</string>
     <string name="onboarding_history_title">Undo and Redo</string>

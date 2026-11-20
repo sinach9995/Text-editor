@@ -27,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
@@ -115,22 +117,28 @@ private fun TabChip(
     // to flare outwards; content is pushed in by the same amount to stay centred
     // in the visible body.
     val inset = if (active) FOOT else 0.dp
+    val accentColor = MaterialTheme.colorScheme.primary
     Column(
         modifier = Modifier
             .height(height)
             .clip(shape)
             .background(background)
+            .then(
+                if (active) Modifier.drawWithContent {
+                    drawContent()
+                    val insetPx = inset.toPx()
+                    val width = (size.width - insetPx * 2f).coerceAtLeast(0f)
+                    if (width > 0f) {
+                        drawRect(
+                            color = accentColor,
+                            topLeft = Offset(insetPx, 0f),
+                            size = Size(width, 2.dp.toPx()),
+                        )
+                    }
+                } else Modifier
+            )
             .clickable(onClick = onSelect),
     ) {
-        if (active) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = inset)
-                    .height(2.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
         Row(
             modifier = Modifier.weight(1f).padding(start = 12.dp + inset, end = 6.dp + inset),
             verticalAlignment = Alignment.CenterVertically,

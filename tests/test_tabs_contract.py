@@ -275,6 +275,18 @@ check("long-pressing a closed Recent row forgets it",
       "onForget = ::forgetRecent" in MAIN and "combinedClickable(" in RECENT)
 check("legacy bottom-bar arrow hints are removed from both locales",
       "New ▲" not in STRINGS_EN and "Save ▲" not in STRINGS_EN and "▲" not in STRINGS_FA)
+check("tapping blank area below line 1 requests editor focus",
+      "editorFocus.requestFocus()" in MAIN and ".focusRequester(editorFocus)" in MAIN)
+check("Find bar reserves top padding so line 1 stays visible",
+      "val topPad = if (finding) 76.dp else 20.dp" in MAIN and ".padding(top = topPad," in MAIN)
+check("active tab top accent draws cleanly over content instead of collapsing",
+      "drawWithContent" in STRIP)
+check("Recent hides underlying editor and actions from accessibility and clears focus",
+      "clearAndSetSemantics" in MAIN and "LaunchedEffect(vm.home)" in MAIN
+      and "!vm.home" in body(MAIN, "private fun HermesEditor("))
+check("Help dialog aligns system bar icon appearance with light/dark theme",
+      "isAppearanceLightStatusBars" in (SRC / "HelpAndOnboarding.kt").read_text(encoding='utf-8')
+      and "isAppearanceLightStatusBars" in MAIN)
 
 # --- Version + CI ---------------------------------------------------------
 check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)

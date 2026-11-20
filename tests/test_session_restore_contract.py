@@ -163,6 +163,9 @@ check("awaitTextOf failure notifies user of save failure across Save/Save As and
       and "notifyMessage(getString(R.string.save_failed))" in body(MAIN, "private val exportDocument ="))
 check("Save and Save As deduplicate tabs sharing the saved URI and notify when closed",
       "dedupeSavedUri(tabId, uri)" in write_tab and "R.string.saved_deduped" in write_tab)
+check("first Save on an untitled document says Saved instead of Saved copy",
+      "val hadUri = vm.tabs.firstOrNull { it.id == tabId }?.uri != null" in write_tab
+      and "saveAs && hadUri -> R.string.saved_copy" in write_tab)
 
 # --- Consumer-QA fixes that must not regress ------------------------------
 check("blank untitled document is not dirty", "tab.isDirty = tab.uri != null || text.isNotEmpty()" in VM)
