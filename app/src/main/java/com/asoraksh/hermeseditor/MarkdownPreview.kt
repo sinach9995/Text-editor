@@ -98,14 +98,7 @@ fun markdownToPlainText(src: String): String {
     // Keep list structure in the export: a plain-text copy of a bulleted or
     // task list must still read as a list.
     fun itemPrefix(item: ListItem, ordinal: Int): String {
-        // Task marker wins: "[x] " / "[ ] ".
-        var child: Node? = item.firstChild
-        while (child != null) {
-            if (child is TaskListItemMarker) {
-                return "[" + (if (child.isChecked) "x" else " ") + "] "
-            }
-            child = child.next
-        }
+        findTaskMarker(item)?.let { return "[" + (if (it.isChecked) "x" else " ") + "] " }
         // commonmark 0.30 keeps the marker on the parent list, not on a node
         // inside the item: BulletList.getMarker() and
         // OrderedList.getMarkerStartNumber() + getMarkerDelimiter().

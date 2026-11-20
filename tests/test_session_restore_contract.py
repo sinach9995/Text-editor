@@ -48,8 +48,7 @@ restore = body(VM, "fun restoreSession(")
 hydrate = body(VM, "private fun hydrate(")
 attach_draft = body(VM, "fun attachDraft(")
 on_create = body(MAIN, "override fun onCreate(savedInstanceState: Bundle?)")
-save_to = body(MAIN, "private fun saveToUri(")
-save_as = body(MAIN, "private fun saveAsToUri(")
+write_tab = body(MAIN, "private fun writeTabToUri(")
 open_doc = body(MAIN, "private val openDocument = registerForActivityResult")
 open_in = body(MAIN, "private fun openIncoming(")
 # 1.7: the picker and the share intent both hand the uri to openUri, so the
@@ -77,11 +76,13 @@ check("the draft directory is attached before the idempotence guard",
 check("restore persists the manifest it just built", "persistManifest()" in restore)
 
 # --- Hydration priority and bounds ---------------------------------------
-check("draft is read before the file", hydrate.find("draftFile(tab)") < hydrate.find("reader?.invoke(uri)"))
-check("a draft makes the tab dirty", "applyText(tab, draft, dirty = true)" in hydrate)
-check("a file read leaves the tab clean", "applyText(tab, text, dirty = false)" in hydrate)
+check("draft is read before the file", hydrate.find("readDraft(tab)") < hydrate.find("reader?.invoke"))
+check("hydrate and awaitTextOf share resolveHydration precedence",
+      "resolveHydration(draft, uri != null)" in hydrate
+      and "resolveHydration(draft, uri != null)" in body(VM, "suspend fun awaitTextOf(")
+      and "applyText(tab, resolved.text, dirty = resolved.dirty)" in hydrate)
 check("draft read is bounded", "BoundedReader.readText(file, DRAFT_MAX_BYTES)" in body(VM, "private fun readDraft("))
-check("file read is bounded", "runCatching { reader?.invoke(uri) }" in hydrate)
+check("file read is bounded", "runCatching { reader?.invoke(" in hydrate)
 check("a hydrate that lost its tab is dropped", "_tabs.contains(tab)" in hydrate)
 check("an unreadable uri degrades to untitled instead of crashing", "tab.title = UNTOOLED_TXT" in hydrate)
 
@@ -137,19 +138,19 @@ check("an incoming file opens beside the open documents, not over them",
       and "vm.openInNewTab(target, displayName(target), text)" in open_uri)
 
 # --- Grants ---------------------------------------------------------------
-check("saveToUri persists the grant", "takePersistablePermissions(uri)" in save_to)
-check("saveAsToUri persists the grant", "takePersistablePermissions(uri)" in save_as)
+check("writeTabToUri persists the grant and backs both Save and Save As",
+      "takePersistablePermissions(uri)" in write_tab
+      and "private fun saveToUri(uri: Uri) = writeTabToUri(uri, saveAs = false)" in MAIN
+      and "private fun saveAsToUri(uri: Uri) = writeTabToUri(uri, saveAs = true)" in MAIN)
 check("closing a tab releases its grant", "releasePermission(uri)" in body(MAIN, "fun requestCloseTab("))
 
 # --- A save clears the dirty flag only when the file holds the live text --
-check("saveToUri compares the written text with that tab's live text",
-      "vm.sameText(tabId, draft)" in save_to and "val tabId = takeSaveTabId()" in save_to and "vm.awaitTextOf(tabId)" in save_to)
-check("saveToUri clears dirty state only under the guard",
-      "if (vm.sameText(tabId, draft)) vm.markClean(tabId)" in save_to and save_to.count("markClean(") == 1)
-check("saveAsToUri compares written text with live text",
-      "vm.sameText(tabId, draft)" in save_as and "val tabId = takeSaveTabId()" in save_as and "vm.awaitTextOf(tabId)" in save_as)
+check("writeTabToUri compares written text with that tab's live hydrated text",
+      "vm.sameText(tabId, draft)" in write_tab and "val tabId = takeSaveTabId()" in write_tab and "vm.awaitTextOf(tabId)" in write_tab)
+check("writeTabToUri clears dirty state only under the guard",
+      "if (vm.sameText(tabId, draft)) vm.markClean(tabId)" in write_tab and write_tab.count("markClean(") == 1)
 check("failed Save As does not re-open the Save As prompt",
-      "fallbackSaveAsAfterDenied" not in save_as and "R.string.save_failed" in save_as)
+      "if (saveAs) notifyMessage(getString(R.string.save_failed))" in write_tab and "else fallbackSaveAsAfterDenied(failure)" in write_tab)
 check("pending save tab survives Activity recreation",
       "onSaveInstanceState(" in MAIN and '"pending_save_tab_id"' in MAIN and 'pendingSaveTabId = savedInstanceState?.getString("pending_save_tab_id")' in on_create)
 check("unhydrated tabs never masquerade as empty and awaitTextOf hydrates stubs",
@@ -157,13 +158,14 @@ check("unhydrated tabs never masquerade as empty and awaitTextOf hydrates stubs"
       and "suspend fun awaitTextOf(" in VM and "applyText(tab, resolved.text" in body(VM, "suspend fun awaitTextOf("))
 check("hydration precedence helper is tested in JUnit",
       "HydrationPrecedenceTest" in (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/TabManifestCodecTest.kt").read_text(encoding='utf-8'))
-check("awaitTextOf failure notifies user of save failure across Save, Save As, and Export",
-      "notifyMessage(getString(R.string.save_failed))" in save_to
-      and "notifyMessage(getString(R.string.save_failed))" in save_as
+check("awaitTextOf failure notifies user of save failure across Save/Save As and Export",
+      "notifyMessage(getString(R.string.save_failed))" in write_tab
       and "notifyMessage(getString(R.string.save_failed))" in body(MAIN, "private val exportDocument ="))
 check("Save and Save As deduplicate tabs sharing the saved URI and notify when closed",
-      "dedupeSavedUri(tabId, uri)" in save_to and "dedupeSavedUri(tabId, uri)" in save_as
-      and "R.string.saved_deduped" in save_to and "R.string.saved_deduped" in save_as)
+      "dedupeSavedUri(tabId, uri)" in write_tab and "R.string.saved_deduped" in write_tab)
+check("first Save on an untitled document says Saved instead of Saved copy",
+      "val hadUri = vm.tabs.firstOrNull { it.id == tabId }?.uri != null" in write_tab
+      and "saveAs && hadUri -> R.string.saved_copy" in write_tab)
 
 # --- Consumer-QA fixes that must not regress ------------------------------
 check("blank untitled document is not dirty", "tab.isDirty = tab.uri != null || text.isNotEmpty()" in VM)

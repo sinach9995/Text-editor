@@ -20,9 +20,9 @@
     <string name="discard_open">Your unsaved changes will be lost if you continue.</string>
     <string name="discard_clear">This will clear the editor. Your last saved file will not be changed.</string>
     <string name="err_open">Could not open file</string>
-    <string name="err_save">Could not save file</string>
+    <string name="err_file_too_large">File is larger than 5 MB</string>
+    <string name="err_read_only_save_as">File is read-only, choose Save As</string>
     <string name="hint">Start writing…</string>
-    <string name="lang_desc">Language</string>
     <string name="dir_menu">Text direction</string>
     <string name="dir_ltr">Left-to-right</string>
     <string name="dir_rtl">Right-to-left</string>
@@ -98,14 +98,12 @@
     <string name="no_matches">No matches</string>
     <string name="previous_match">Previous match</string>
     <string name="next_match">Next match</string>
-    <string name="zoom_hint">Use two fingers to zoom text in or out.</string>
-    <string name="save_hint">Hold the floppy Save button for Save as and Export.</string>
     <string name="back">Back</string>
     <string name="new_txt">New text file (.txt)</string>
     <string name="new_md">New Markdown file (.md)</string>
     <string name="onboarding_title">Getting started</string>
     <string name="onboarding_new_title">New</string>
-    <string name="onboarding_new_body">Tap the page-plus button in the corner to open a new text tab. Hold it to choose a Text or Markdown file.</string>
+    <string name="onboarding_new_body">Tap New on the Recent screen, or the page-plus button in the corner of any open tab. Hold the corner button to choose a Text or Markdown file.</string>
     <string name="onboarding_save_title">Save</string>
     <string name="onboarding_save_body">Tap the floppy button in the corner to save the current tab. Hold it for Save as and export options.</string>
     <string name="onboarding_history_title">Undo and Redo</string>

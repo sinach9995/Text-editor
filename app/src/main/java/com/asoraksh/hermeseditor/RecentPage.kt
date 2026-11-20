@@ -36,20 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * The home page: what the app shows when nothing is open, and what the app icon
- * returns to. It is a page behind the icon, not a tab in the strip, so the strip
- * keeps showing the open documents while this is on screen.
- *
- * The heading is a title block -- the app name, then the page name -- with a rule
- * across the page under it; only what is under the rule is this page's list. The
- * first cut began with a bare button row flush against the top band, which read
- * as a clipped page rather than a composed one.
- *
- * The list is every document open right now, then this app's own history of what
- * it has opened, newest first. Nothing here reaches outside the app to list files
- * it has never seen.
- */
+/** Home screen shown when no tabs are open or when tapping the app icon; covers open tabs in memory. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecentPage(

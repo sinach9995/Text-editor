@@ -20,9 +20,9 @@
     <string name="discard_open">در صورت ادامه، تغییرات ذخیره‌نشده شما از بین می‌رود.</string>
     <string name="discard_clear">این کار ویرایشگر را پاک می‌کند. آخرین فایل ذخیره‌شده شما تغییر نمی‌کند.</string>
     <string name="err_open">فایل باز نشد</string>
-    <string name="err_save">فایل ذخیره نشد</string>
+    <string name="err_file_too_large">فایل بزرگ‌تر از ۵ مگابایت است</string>
+    <string name="err_read_only_save_as">فایل فقط‌خواندنی است، ذخیره به‌عنوان بزنید</string>
     <string name="hint">شروع به نوشتن…</string>
-    <string name="lang_desc">زبان</string>
     <string name="dir_menu">جهت متن</string>
     <string name="dir_ltr">چپ‌به‌راست</string>
     <string name="dir_rtl">راست‌به‌چپ</string>
@@ -98,14 +98,12 @@
     <string name="no_matches">موردی پیدا نشد</string>
     <string name="previous_match">نتیجهٔ قبلی</string>
     <string name="next_match">نتیجهٔ بعدی</string>
-    <string name="zoom_hint">برای بزرگ یا کوچک کردن متن، با دو انگشت زوم کنید.</string>
-    <string name="save_hint">برای ذخیره با نام دیگر و خروجی، دکمهٔ فلاپی ذخیره را نگه دارید.</string>
     <string name="back">بازگشت</string>
     <string name="new_txt">فایل متنی جدید (.txt)</string>
     <string name="new_md">فایل Markdown جدید (.md)</string>
     <string name="onboarding_title">راهنمای شروع</string>
     <string name="onboarding_new_title">جدید</string>
-    <string name="onboarding_new_body">برای باز کردن تب متنی جدید روی دکمهٔ صفحه و بعلاوه در گوشه بزنید. برای انتخاب فایل متنی یا Markdown، آن را نگه دارید.</string>
+    <string name="onboarding_new_body">در صفحهٔ اخیر روی جدید بزنید یا در تب باز از دکمهٔ صفحه و بعلاوه در گوشه استفاده کنید. برای انتخاب فایل متنی یا Markdown، دکمهٔ گوشه را نگه دارید.</string>
     <string name="onboarding_save_title">ذخیره</string>
     <string name="onboarding_save_body">برای ذخیرهٔ تب فعلی روی دکمهٔ فلاپی در گوشه بزنید. برای ذخیره با نام دیگر و گزینه‌های خروجی، آن را نگه دارید.</string>
     <string name="onboarding_history_title">بازگرداندن و تکرار تغییر</string>

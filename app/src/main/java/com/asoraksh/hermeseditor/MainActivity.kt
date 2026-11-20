@@ -16,16 +16,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -33,21 +27,15 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
@@ -56,12 +44,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import java.util.Locale
 import java.io.File
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineStart
@@ -74,10 +59,15 @@ import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
-
-private enum class AppTheme { DARK, LIGHT }
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("hermes_editor", MODE_PRIVATE) }
@@ -95,8 +85,6 @@ class MainActivity : ComponentActivity() {
         config.setLocale(Locale(lang))
         super.attachBaseContext(ContextWrapper(newBase.createConfigurationContext(config)))
     }
-
-    private fun msg(en: String, fa: String) = if ((prefs.getString("lang", "en") ?: "en") == "fa") fa else en
 
     /**
      * Take persistable READ first, then attempt WRITE in its own guarded call.
@@ -183,11 +171,11 @@ class MainActivity : ComponentActivity() {
             val text = result.getOrNull()
             when {
                 result.exceptionOrNull() is BoundedReader.TooLargeException ->
-                    notifyMessage(msg("File is larger than 5 MB", "فایل بزرگ‌تر از ۵ مگابایت است"))
+                    notifyMessage(getString(R.string.err_file_too_large))
                 // Leave every buffer untouched; an empty tab here would be an
                 // empty tab the user never asked for.
                 text == null -> {
-                    notifyMessage(msg("Could not open file", "فایل باز نشد"))
+                    notifyMessage(getString(R.string.err_open))
                     // A row that cannot be read any more fails on every tap;
                     // forget it instead of leaving a dead entry on the list.
                     if (fromRecent) forgetRecent(RecentFile(target.toString(), displayName(target)))
@@ -345,13 +333,8 @@ class MainActivity : ComponentActivity() {
         return duplicates.isNotEmpty()
     }
 
-    private fun saveToUri(uri: Uri) {
-        // Pin the tab: the write below is async, and a tab switch in that window
-        // used to move the new uri, title and clean flag onto the OTHER tab --
-        // which then saved its own text into this file on the next Save.
+    private fun writeTabToUri(uri: Uri, saveAs: Boolean) {
         val tabId = takeSaveTabId()
-        // A CreateDocument grant is temporary: without persisting it here the
-        // file cannot be reopened after process death.
         takePersistablePermissions(uri)
         lifecycleScope.launch {
             val draft = vm.awaitTextOf(tabId) ?: run {
@@ -366,52 +349,28 @@ class MainActivity : ComponentActivity() {
             }
             val failure = result.exceptionOrNull()
             if (failure != null) {
-                // ACTION_VIEW/ACTION_SEND grants expire: keep the text and let the
-                // user pick a new target instead of losing the write.
-                fallbackSaveAsAfterDenied(failure)
+                if (saveAs) notifyMessage(getString(R.string.save_failed))
+                else fallbackSaveAsAfterDenied(failure)
             } else {
+                val name = displayName(uri)
+                val hadUri = vm.tabs.firstOrNull { it.id == tabId }?.uri != null
                 vm.setDocumentUri(tabId, uri)
                 val deduped = dedupeSavedUri(tabId, uri)
-                vm.renameTitle(tabId, displayName(uri))
-                // Text typed while the write was in flight is not in the file.
-                // Clearing the dirty flag and retiring the recovery draft here
-                // would report it saved and drop the only copy of those keys.
+                vm.renameTitle(tabId, name)
+                // Only clear dirty/draft when nothing was typed during the write.
                 if (vm.sameText(tabId, draft)) vm.markClean(tabId)
-                rememberRecent(uri, displayName(uri))
-                notifyMessage(getString(if (deduped) R.string.saved_deduped else R.string.saved, displayName(uri)))
+                rememberRecent(uri, name)
+                notifyMessage(getString(when {
+                    deduped -> R.string.saved_deduped
+                    saveAs && hadUri -> R.string.saved_copy
+                    else -> R.string.saved
+                }, name))
             }
         }
     }
-    private fun saveAsToUri(uri: Uri) {
-        val tabId = takeSaveTabId()
-        takePersistablePermissions(uri)
-        lifecycleScope.launch {
-            val draft = vm.awaitTextOf(tabId) ?: run {
-                notifyMessage(getString(R.string.save_failed))
-                return@launch
-            }
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    requireNotNull(contentResolver.openOutputStream(uri, "wt"))
-                        .bufferedWriter(Charsets.UTF_8).use { it.write(draft) }
-                }.isSuccess
-            }
-            if (ok) {
-                vm.setDocumentUri(tabId, uri)
-                val deduped = dedupeSavedUri(tabId, uri)
-                vm.renameTitle(tabId, displayName(uri))
-                // Same guard as saveToUri: only retire the draft when the file
-                // holds exactly the text on screen.
-                if (vm.sameText(tabId, draft)) vm.markClean(tabId)
-                rememberRecent(uri, displayName(uri))
-                notifyMessage(getString(if (deduped) R.string.saved_deduped else R.string.saved_copy, displayName(uri)))
-            } else {
-                // The picked target failed for an unknown reason; "read-only" plus
-                // another Save As prompt would misdiagnose it and loop.
-                notifyMessage(getString(R.string.save_failed))
-            }
-        }
-    }
+
+    private fun saveToUri(uri: Uri) = writeTabToUri(uri, saveAs = false)
+    private fun saveAsToUri(uri: Uri) = writeTabToUri(uri, saveAs = true)
 
     /**
      * An ACTION_VIEW / ACTION_SEND share is frequently read-only. Rather than
@@ -420,7 +379,7 @@ class MainActivity : ComponentActivity() {
      */
     private val saveAsFallback = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private fun fallbackSaveAsAfterDenied(cause: Throwable?) {
-        notifyMessage(msg("File is read-only, choose Save As", "فایل فقط‌خواندنی است، ذخیره به‌عنوان بزنید"))
+        notifyMessage(getString(R.string.err_read_only_save_as))
         saveAsFallback.trySend(Unit)
     }
     private fun baseName(title: String) = title.substringBeforeLast('.', title).ifBlank { "document" }
@@ -495,6 +454,8 @@ class MainActivity : ComponentActivity() {
         }
         val snackbar = remember { SnackbarHostState() }
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        val editorFocus = remember { FocusRequester() }
+        val keyboardController = LocalSoftwareKeyboardController.current
         var fontSize by remember { mutableStateOf(prefs.getFloat("document_font_size", 17f).coerceIn(13f, 30f)) }
         var finding by rememberSaveable { mutableStateOf(false) }
         var query by rememberSaveable { mutableStateOf("") }
@@ -513,7 +474,8 @@ class MainActivity : ComponentActivity() {
         previewTextAnchors.onCorrection = { delta -> previewScroll.dispatchRawDelta(delta) }
         val scope = rememberCoroutineScope()
         val density = LocalDensity.current
-        val textTop = with(density) { 20.dp.toPx() }
+        val topPad = if (finding) 76.dp else 20.dp
+        val textTop = with(density) { topPad.toPx() }
         val previewTop = with(density) { 16.dp.toPx() }
         var pendingAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
         var pinchAnchor by remember { mutableStateOf<DocumentAnchor?>(null) }
@@ -866,7 +828,24 @@ class MainActivity : ComponentActivity() {
                 dirSuggest = null
             }
         }
+        val isLightTheme = selectedTheme == AppTheme.LIGHT
+        SideEffect {
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = isLightTheme
+                isAppearanceLightNavigationBars = isLightTheme
+            }
+        }
+        LaunchedEffect(vm.home) {
+            if (vm.home) {
+                finding = false
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+        }
         MaterialTheme(colorScheme = colors) {
+            val versionName = remember {
+                try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7.0" } catch (_: Exception) { "1.7.0" }
+            }
             BackHandler {
                 when {
                     finding -> finding = false
@@ -878,9 +857,6 @@ class MainActivity : ComponentActivity() {
                 containerColor = colors.background,
                 snackbarHost = { SnackbarHost(snackbar) },
                 topBar = {
-                    // One band: icon, tabs, corner menu. It stays in landscape
-                    // with the keyboard open too -- the tabs are the only way to
-                    // know which document is on screen, and it costs 52dp.
                     HeaderBar(
                         theme = selectedTheme,
                         setTheme = { selectedTheme = it; prefs.edit().putString("theme", if (it == AppTheme.LIGHT) "light" else "dark").apply() },
@@ -901,11 +877,16 @@ class MainActivity : ComponentActivity() {
                         onSelectTab = ::selectTab,
                         onCloseTab = ::requestCloseTab,
                         onHome = { finding = false; vm.goHome(); focusManager.clearFocus() },
+                        versionName = versionName,
                     )
                 },
                 contentWindowInsets = WindowInsets.safeDrawing
             ) { innerPadding ->
-                Box(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding).onSizeChanged { viewportHeight = it.height }) {
+                Box(
+                    Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
+                        .onSizeChanged { viewportHeight = it.height }
+                        .then(if (vm.home) Modifier.clearAndSetSemantics { } else Modifier)
+                ) {
                 val docDirection = if (docRtl) TextDirection.Rtl else TextDirection.Ltr
                 val docAlign = if (docRtl) TextAlign.Right else TextAlign.Left
                 if (isMarkdownName(title) && mdPreview) {
@@ -944,12 +925,19 @@ class MainActivity : ComponentActivity() {
                         }
                     ) {
                     Box(Modifier.fillMaxSize().clipToBounds().documentPinchZoom(zoomDocument, startPinch, endPinch)
+                        .pointerInput(Unit) {
+                            detectTapGestures {
+                                editorFocus.requestFocus()
+                                keyboardController?.show()
+                            }
+                        }
                         .verticalScroll(editorScroll).padding(horizontal = 20.dp)
                         // Room for the corner buttons: 5 stacked dots when closed,
                         // 1 compact horizontal row when the keyboard is open.
-                        .padding(top = 20.dp, bottom = if (imeBottom == 0) 280.dp else 70.dp)) {
+                        .padding(top = topPad, bottom = if (imeBottom == 0) 280.dp else 70.dp)) {
                     BasicTextField(
                         value = editor,
+                        enabled = !vm.home,
                         onValueChange = { newValue ->
                             vm.onTextChanged(newValue, allowCoalescing = !pastedEdit)
                             pastedEdit = false
@@ -968,6 +956,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onTextLayout = { textLayout = it },
                         modifier = Modifier.fillMaxWidth()
+                            .focusRequester(editorFocus)
                             .onFocusChanged { editorFocused = it.isFocused }
                             .bringIntoViewRequester(cursorRequester)
                             .onSizeChanged { sourceContentSize = it }
@@ -1014,7 +1003,7 @@ class MainActivity : ComponentActivity() {
                 // strip from the text. They are hidden behind Find and Markdown
                 // preview, where they would either cover the document or do
                 // nothing useful.
-                if (!finding && !mdPreview) {
+                if (!finding && !mdPreview && !vm.home) {
                     FloatingActions(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 10.dp),
                         inRow = imeBottom > 0,
@@ -1095,6 +1084,8 @@ class MainActivity : ComponentActivity() {
                 dismissButton = { TextButton(onClick = { showFormatChoice = false }) { Text(stringResource(R.string.cancel)) } }
             )
             if (showHelp) HelpPage(
+                isRtl = lang == "fa",
+                isLight = isLightTheme,
                 onClose = { showHelp = false },
                 onReplayIntro = {
                     showHelp = false
@@ -1124,315 +1115,6 @@ class MainActivity : ComponentActivity() {
             RadioButton(selected = selected, onClick = null)
             Spacer(Modifier.width(8.dp))
             Text(label)
-        }
-    }
-
-    /**
-     * One band, not two. The old bar spent its largest type repeating the file
-     * name that the tab directly below it already showed; now the icon is the
-     * way home, the tab carries the name, and the menu lives in the corner.
-     */
-    @Composable private fun HeaderBar(
-        theme: AppTheme, setTheme: (AppTheme) -> Unit, lang: String, setLang: (String) -> Unit,
-        onDiscardRequest: () -> Unit, isMarkdown: Boolean, previewing: Boolean, onTogglePreview: () -> Unit,
-        onDirRequest: () -> Unit, onHelpRequest: () -> Unit, onFind: () -> Unit,
-        fontSize: Float, onFontSize: (Float) -> Unit,
-        tabs: List<TabState>, activeTabId: String, homeActive: Boolean,
-        onSelectTab: (String) -> Unit, onCloseTab: (String) -> Unit, onHome: () -> Unit,
-    ) {
-        var expanded by remember { mutableStateOf(false) }; var about by remember { mutableStateOf(false) }
-        val homeLabel = stringResource(R.string.recent_tab)
-        val iconTint = if (theme == AppTheme.DARK) Color(0xFFF5F7FA) else Color(0xFF1B1D22)
-        val showingDoc = !homeActive && tabs.isNotEmpty()
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(start = 10.dp, end = 10.dp), verticalAlignment = Alignment.Bottom) {
-                // A real target, not decoration: tapping the icon is the way back
-                // to Recent, the same way a browser logo is a home button. While
-                // Recent is showing, the icon says so -- it grows a little and
-                // takes a tinted plate -- because there is no tab to carry that
-                // state any more.
-                Box(
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .then(
-                            if (homeActive) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.30f))
-                            else Modifier
-                        )
-                        .clickable(onClick = onHome),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.hermes_editor_icon),
-                        contentDescription = homeLabel,
-                        modifier = Modifier
-                            .size(if (homeActive) 34.dp else 30.dp)
-                            .clip(RoundedCornerShape(9.dp)),
-                    )
-                }
-                Spacer(Modifier.width(6.dp))
-                TabStrip(
-                    tabs = tabs,
-                    activeId = activeTabId,
-                    homeActive = homeActive,
-                    onSelect = onSelectTab,
-                    onClose = onCloseTab,
-                    modifier = Modifier.weight(1f),
-                )
-                CornerOverflow(
-                    expanded = expanded,
-                    onOpen = { expanded = true },
-                    onDismiss = { expanded = false },
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                ) {
-                    // Theme: the text comes first and the sun/moon trails it, so
-                    // the row reads as one line instead of an icon and a label.
-                    DropdownMenuItem(
-                        text = { Text(stringResource(if (theme == AppTheme.DARK) R.string.theme_to_light else R.string.theme_to_dark)) },
-                        trailingIcon = { Image(painter = painterResource(id = if (theme == AppTheme.DARK) R.drawable.asora_theme_sun_minimal else R.drawable.asora_theme_moon_minimal), contentDescription = null, modifier = Modifier.size(22.dp), colorFilter = ColorFilter.tint(iconTint)) },
-                        onClick = { setTheme(if (theme == AppTheme.DARK) AppTheme.LIGHT else AppTheme.DARK); expanded = false }
-                    )
-                    // Language keeps no glyph: two globe icons in one menu were
-                    // noise, and the label already names the language.
-                    DropdownMenuItem(
-                        text = { Text(if (lang == "fa") "English" else "فارسی") },
-                        onClick = { setLang(if (lang == "fa") "en" else "fa"); expanded = false }
-                    )
-                    if (showingDoc) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.dir_menu)) }, onClick = { onDirRequest(); expanded = false })
-                        if (isMarkdown) DropdownMenuItem({ Text(stringResource(if (previewing) R.string.edit_md else R.string.preview_md)) }, onClick = { onTogglePreview(); expanded = false })
-                        DropdownMenuItem({ Text(stringResource(R.string.find)) }, onClick = { onFind(); expanded = false })
-                    }
-                    // Font size stepper: the label sits in the same 12dp column as
-                    // every other row and the buttons hug the number, because a
-                    // row that started further right looked like a different kind
-                    // of control.
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 12.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.font_size), modifier = Modifier.weight(1f), fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-                        FontStep("−", enabled = fontSize > 13f) { onFontSize(fontSize - 1f) }
-                        Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
-                            Text("${fontSize.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                        }
-                        FontStep("+", enabled = fontSize < 30f) { onFontSize(fontSize + 1f) }
-                    }
-                    if (showingDoc) {
-                        DropdownMenuItem({ Text(stringResource(R.string.discard)) }, onClick = { onDiscardRequest(); expanded = false })
-                    }
-                    DropdownMenuItem({ Text(stringResource(R.string.help)) }, onClick = { onHelpRequest(); expanded = false })
-                    DropdownMenuItem({ Text(stringResource(R.string.about)) }, onClick = { about = true; expanded = false })
-                }
-            }
-        }
-        if (about) {
-            val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2" } catch (_: Exception) { "1.2" }
-            AlertDialog(onDismissRequest = { about = false }, title = { Text("Hermes Text Editor") }, text = { Text(stringResource(R.string.about_body, version)) }, confirmButton = { TextButton(onClick = { about = false }) { Text(stringResource(R.string.close)) } })
-        }
-    }
-
-    /**
-     * The menu control: one whole disc at the end of the band, three dots stacked
-     * vertically on it. The half-disc it replaced read as a tab, and the dots in
-     * a row read as a horizontal "more" affordance.
-     */
-    @Composable private fun CornerOverflow(expanded: Boolean, onOpen: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier, menu: @Composable ColumnScope.() -> Unit) {
-        val moreLabel = stringResource(R.string.more_menu)
-        Box(modifier = modifier) {
-            Surface(
-                modifier = Modifier.size(44.dp).clickable(onClick = onOpen).semantics { contentDescription = moreLabel },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        repeat(3) {
-                            Box(Modifier.size(3.5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
-                        }
-                    }
-                }
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, content = menu)
-        }
-    }
-
-    /** One side of the font stepper; disabled at the 13sp/30sp ends instead of silently clamping. */
-    @Composable private fun FontStep(label: String, enabled: Boolean, onClick: () -> Unit) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .clickable(enabled = enabled, onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                label,
-                fontSize = 18.sp,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-            )
-        }
-    }
-
-    @Composable private fun HelpPage(onClose: () -> Unit, onReplayIntro: () -> Unit) {
-        val titles = stringArrayResource(R.array.help_titles)
-        val bodies = stringArrayResource(R.array.help_bodies)
-        // Keep the editor composed underneath so its selection and scroll survive.
-        androidx.compose.ui.window.Dialog(onDismissRequest = onClose,
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            CompositionLocalProvider(LocalLayoutDirection provides if (prefs.getString("lang", "en") == "fa") LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ControlButton(ControlIcon.Back, stringResource(R.string.back), onClick = onClose)
-                            Spacer(Modifier.width(12.dp))
-                            Text(stringResource(R.string.help), style = MaterialTheme.typography.titleLarge)
-                        }
-                        HorizontalDivider()
-                        TextButton(
-                            onClick = onReplayIntro,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                        ) { Text(stringResource(R.string.onboarding_replay)) }
-                        HorizontalDivider()
-                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp)) {
-                            titles.forEachIndexed { i, title ->
-                                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(8.dp))
-                                Text(bodies.getOrElse(i) { "" }, fontSize = 16.sp, lineHeight = 25.sp)
-                                Spacer(Modifier.height(24.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun OnboardingLanguageDialog(onLanguage: (String) -> Unit) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { }) {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                tonalElevation = 6.dp,
-                shadowElevation = 8.dp
-            ) {
-                Column(
-                    Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        "Choose language / زبان را انتخاب کنید",
-                        style = MaterialTheme.typography.titleLarge,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(20.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(onClick = { onLanguage("en") }) { Text("English") }
-                        Button(onClick = { onLanguage("fa") }) { Text("فارسی") }
-                    }
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun OnboardingGuide(
-        language: String,
-        step: Int,
-        onBack: () -> Unit,
-        onSkip: () -> Unit,
-        onNext: () -> Unit
-    ) {
-        val safeStep = step.coerceIn(0, 3)
-        val title = when (safeStep) {
-            0 -> stringResource(R.string.onboarding_new_title)
-            1 -> stringResource(R.string.onboarding_save_title)
-            2 -> stringResource(R.string.onboarding_history_title)
-            else -> stringResource(R.string.onboarding_zoom_title)
-        }
-        val body = when (safeStep) {
-            0 -> stringResource(R.string.onboarding_new_body)
-            1 -> stringResource(R.string.onboarding_save_body)
-            2 -> stringResource(R.string.onboarding_history_body)
-            else -> stringResource(R.string.onboarding_zoom_body)
-        }
-        val progress = if (language == "fa") {
-            listOf("۱ از ۴", "۲ از ۴", "۳ از ۴", "۴ از ۴")[safeStep]
-        } else {
-            "${safeStep + 1} / 4"
-        }
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = onSkip,
-            properties = androidx.compose.ui.window.DialogProperties(
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false
-            )
-        ) {
-            CompositionLocalProvider(
-                LocalLayoutDirection provides if (language == "fa") LayoutDirection.Rtl else LayoutDirection.Ltr
-            ) {
-                // Keep this upper card well clear of floating Undo/Redo and
-                // the bottom New/Open/Save controls it describes.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(start = 24.dp, top = 120.dp, end = 24.dp, bottom = 270.dp),
-                    // Lower placement: directly above Undo/Redo without
-                    // covering it or the bottom New/Open/Save controls.
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(28.dp),
-                        tonalElevation = 6.dp,
-                        shadowElevation = 8.dp
-                    ) {
-                        Column(Modifier.padding(24.dp)) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    stringResource(R.string.onboarding_title),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    progress,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                            Spacer(Modifier.height(20.dp))
-                            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(8.dp))
-                            Text(body, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
-                            Spacer(Modifier.height(20.dp))
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (safeStep > 0) {
-                                    TextButton(onClick = onBack) { Text(stringResource(R.string.onboarding_back)) }
-                                }
-                                Spacer(Modifier.weight(1f))
-                                TextButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) }
-                                Spacer(Modifier.width(6.dp))
-                                Button(onClick = onNext) {
-                                    Text(
-                                        stringResource(
-                                            if (safeStep == 3) R.string.onboarding_done
-                                            else R.string.onboarding_next
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
