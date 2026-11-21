@@ -29,6 +29,12 @@ class MarkdownContractTests(unittest.TestCase):
         self.assertIn('fontSize = 14.sp * scale', code)
         self.assertIn('pinchScale: Float = 1f', code)
         self.assertIn('.graphicsLayer {', code)
+        self.assertIn('TablesExtension.create()', code)
+        self.assertIn('is TableBlock ->', code)
+        self.assertIn('placeRelative(', code)
+        gradle = (ROOT / 'app/build.gradle.kts').read_text(encoding='utf-8')
+        self.assertIn('commonmark-ext-gfm-tables:0.30.0', gradle)
+        self.assertTrue((ROOT / 'app/src/test/java/com/asoraksh/hermeseditor/MarkdownTableTest.kt').exists())
         # The temporary gesture layer belongs to the Markdown document; the
         # application top and bottom bars stay outside MarkdownPreview.
         activity = (SOURCE / 'MainActivity.kt').read_text(encoding='utf-8')

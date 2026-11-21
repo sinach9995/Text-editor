@@ -223,6 +223,20 @@ check("New no longer claims it will discard the current text",
       not ("if (isDirty) { discardAction" in new_file) and "vm.newDocument(markdown)" in new_file)
 check("find only scans while the Find bar is open", "if (finding) findMatches(text, query)" in MAIN)
 
+# --- External / Telegram temporary grants & single-task launch ------------
+MANIFEST_XML = (ROOT / "app/src/main/AndroidManifest.xml").read_text(encoding='utf-8')
+check("MainActivity uses singleTask launchMode for external intents",
+      'android:launchMode="singleTask"' in MANIFEST_XML)
+check("non-persistable URIs copy into app-private ImportedFiles cache",
+      "ImportedFiles.targetFile(" in open_uri
+      and "ImportedFiles.writeAtomic(" in open_uri
+      and "openInputStreamFor(" in open_uri
+      and "openInputStreamFor(" in restore_last)
+check("local import file access enforces canonical path ownership boundary",
+      "ImportedFiles.ownedFile(" in MAIN
+      and "ImportedFiles.delete(" in body(MAIN, "private fun releasePermission(")
+      and (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/ImportedFilesTest.kt").exists())
+
 if failures:
     print(f"\n{len(failures)} contract(s) failed")
     sys.exit(1)

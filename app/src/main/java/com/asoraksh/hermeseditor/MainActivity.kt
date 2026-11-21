@@ -86,20 +86,57 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(ContextWrapper(newBase.createConfigurationContext(config)))
     }
 
+    private val importsDir: File by lazy { File(filesDir, "imports") }
+
+    private fun ownedImportFile(uri: Uri): File? =
+        if (uri.scheme == "file") ImportedFiles.ownedFile(importsDir, uri.path) else null
+
+    private fun openInputStreamFor(uri: Uri): java.io.InputStream? =
+        if (uri.scheme == "file") ownedImportFile(uri)?.let { java.io.FileInputStream(it) }
+        else contentResolver.openInputStream(uri)
+
+    private fun writeTextToUri(uri: Uri, text: String) {
+        ownedImportFile(uri)?.let {
+            ImportedFiles.writeAtomic(it, text)
+            return
+        }
+        requireNotNull(contentResolver.openOutputStream(uri, "wt"))
+            .bufferedWriter(Charsets.UTF_8).use { it.write(text) }
+    }
+
     /**
      * Take persistable READ first, then attempt WRITE in its own guarded call.
      * A single read|write request throws SecurityException as a unit on
      * providers that granted only read, which would forfeit the read grant too.
+     * Returns true when read access survives process restarts (persistent SAF
+     * grant or app-owned local import copy).
      */
-    private fun takePersistablePermissions(uri: Uri) {
-        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        catch (_: SecurityException) { }
+    private fun takePersistablePermissions(uri: Uri): Boolean {
+        if (uri.scheme == "file") return ownedImportFile(uri) != null
+        val readGranted = try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            true
+        } catch (_: SecurityException) {
+            runCatching {
+                contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+            }.getOrDefault(false)
+        } catch (_: IllegalArgumentException) {
+            false
+        }
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         catch (_: SecurityException) { }
+        return readGranted
     }
 
-    /** Grants are a bounded resource; a closed tab gives its own back. */
+    /** Grants and local import copies are released once no open tab or Recent row needs them. */
     private fun releasePermission(uri: Uri) {
+        ownedImportFile(uri)?.let { owned ->
+            if (vm.tabs.none { it.uri == uri } && recentFiles.none { it.uri == uri.toString() }) {
+                ImportedFiles.delete(owned)
+            }
+            return
+        }
+        if (recentFiles.any { it.uri == uri.toString() }) return
         runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
     }
@@ -145,17 +182,22 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Opens [target] in a tab of its own, or jumps to the tab that already holds
+     * Opens [source] in a tab of its own, or jumps to the tab that already holds
      * it. The Open dialog, the Recent tab and an incoming share all go through
-     * here so all three agree on what "already open" means.
+     * here so all three agree on what "already open" means. Temporary grants
+     * (such as Telegram/external shares) are copied to app-private storage so
+     * they reopen cleanly after both apps close.
      */
-    private fun openUri(target: Uri, fromRecent: Boolean = false) {
-        takePersistablePermissions(target)
+    private fun openUri(source: Uri, fromRecent: Boolean = false) {
+        val persistedRead = takePersistablePermissions(source)
+        val key = documentKey(source)
+        val sourceName = displayName(source)
+        val cachedFile = if (!persistedRead) ImportedFiles.targetFile(importsDir, key, sourceName) else null
+        val cachedUri = cachedFile?.let { Uri.fromFile(it) }
         // An already-open file is jumped to, never opened twice: two tabs on one
         // file would save over each other with stale text.
-        val key = documentKey(target)
         val existing = vm.tabs.firstOrNull { tab ->
-            tab.uri?.let { it == target || documentKey(it) == key } == true
+            tab.uri?.let { it == source || (cachedUri != null && it == cachedUri) || documentKey(it) == key } == true
         }
         if (existing != null) {
             vm.switchTab(existing.id)
@@ -166,7 +208,7 @@ class MainActivity : ComponentActivity() {
         // read cannot matter at all.
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { contentResolver.openInputStream(target)?.let { BoundedReader.readText(it) } }
+                runCatching { openInputStreamFor(source)?.let { BoundedReader.readText(it) } }
             }
             val text = result.getOrNull()
             when {
@@ -178,11 +220,23 @@ class MainActivity : ComponentActivity() {
                     notifyMessage(getString(R.string.err_open))
                     // A row that cannot be read any more fails on every tap;
                     // forget it instead of leaving a dead entry on the list.
-                    if (fromRecent) forgetRecent(RecentFile(target.toString(), displayName(target)))
+                    if (fromRecent) forgetRecent(RecentFile(source.toString(), sourceName))
                 }
-                vm.openInNewTab(target, displayName(target), text) == null ->
-                    notifyMessage(getString(if (vm.tabs.size >= TabBudget.MAX_TABS) R.string.tab_limit_reached else R.string.tab_memory_reached))
-                else -> rememberRecent(target, displayName(target))
+                else -> {
+                    val target = if (cachedFile != null) {
+                        withContext(Dispatchers.IO) {
+                            runCatching { ImportedFiles.writeAtomic(cachedFile, text); cachedUri }.getOrNull()
+                        } ?: source
+                    } else {
+                        source
+                    }
+                    if (vm.openInNewTab(target, displayName(target), text) == null) {
+                        if (cachedUri != null && target == cachedUri) releasePermission(target)
+                        notifyMessage(getString(if (vm.tabs.size >= TabBudget.MAX_TABS) R.string.tab_limit_reached else R.string.tab_memory_reached))
+                    } else {
+                        rememberRecent(target, displayName(target))
+                    }
+                }
             }
         }
     }
@@ -305,7 +359,7 @@ class MainActivity : ComponentActivity() {
         ) { uri ->
             // Bounded, like every other read path: a 40 MB remembered file must
             // not kill the process before the first frame.
-            contentResolver.openInputStream(uri)?.let { BoundedReader.readText(it) }
+            openInputStreamFor(uri)?.let { BoundedReader.readText(it) }
         }
     }
 
@@ -342,10 +396,7 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             val result: Result<Unit> = withContext(Dispatchers.IO) {
-                runCatching {
-                    requireNotNull(contentResolver.openOutputStream(uri, "wt"))
-                        .bufferedWriter(Charsets.UTF_8).use { it.write(draft) }
-                }
+                runCatching { writeTextToUri(uri, draft) }
             }
             val failure = result.exceptionOrNull()
             if (failure != null) {
