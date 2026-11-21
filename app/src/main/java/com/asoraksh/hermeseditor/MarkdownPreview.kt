@@ -4,6 +4,7 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import org.commonmark.parser.IncludeSourceSpans
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -29,7 +30,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -37,13 +40,23 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
+import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.ext.gfm.tables.TableBody
+import org.commonmark.ext.gfm.tables.TableCell
+import org.commonmark.ext.gfm.tables.TableHead
+import org.commonmark.ext.gfm.tables.TableRow
+import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.ext.task.list.items.TaskListItemMarker
 import org.commonmark.ext.task.list.items.TaskListItemsExtension
 import org.commonmark.node.BlockQuote
@@ -70,9 +83,63 @@ import org.commonmark.parser.Parser
 // (BSD-2-Clause, no network, no tracking). No WebView, no remote content.
 
 private val mdParser: Parser = Parser.builder()
-    .extensions(listOf(StrikethroughExtension.create(), TaskListItemsExtension.create()))
+    .extensions(
+        listOf(
+            StrikethroughExtension.create(),
+            TaskListItemsExtension.create(),
+            TablesExtension.create(),
+        )
+    )
     .includeSourceSpans(IncludeSourceSpans.BLOCKS)
     .build()
+
+internal data class ParsedTable(
+    val rows: List<List<TableCell?>>,
+    val headerRowCount: Int,
+    val colCount: Int,
+)
+
+internal fun extractTable(block: TableBlock): ParsedTable {
+    val headerRows = mutableListOf<List<TableCell>>()
+    val bodyRows = mutableListOf<List<TableCell>>()
+    fun collectRows(section: Node, out: MutableList<List<TableCell>>) {
+        var row: Node? = section.firstChild
+        while (row != null) {
+            if (row is TableRow) {
+                val cells = mutableListOf<TableCell>()
+                var cell: Node? = row.firstChild
+                while (cell != null) {
+                    if (cell is TableCell) cells.add(cell)
+                    cell = cell.next
+                }
+                if (cells.isNotEmpty()) out.add(cells)
+            }
+            row = row.next
+        }
+    }
+    var section: Node? = block.firstChild
+    while (section != null) {
+        when (section) {
+            is TableHead -> collectRows(section, headerRows)
+            is TableBody -> collectRows(section, bodyRows)
+        }
+        section = section.next
+    }
+    val rawRows = headerRows + bodyRows
+    val colCount = rawRows.maxOfOrNull { it.size } ?: 0
+    if (colCount == 0) return ParsedTable(emptyList(), 0, 0)
+    val padded = rawRows.map { row -> List(colCount) { idx -> row.getOrNull(idx) } }
+    return ParsedTable(rows = padded, headerRowCount = headerRows.size, colCount = colCount)
+}
+
+internal fun parseFirstTable(src: String): ParsedTable? {
+    var node: Node? = mdParser.parse(src).firstChild
+    while (node != null) {
+        if (node is TableBlock) return extractTable(node)
+        node = node.next
+    }
+    return null
+}
 
 // Local Markdown-to-plain-text export. Drops formatting syntax, keeps readable
 // text, paragraph breaks, list text, link labels and code content. Source untouched.
@@ -98,14 +165,7 @@ fun markdownToPlainText(src: String): String {
     // Keep list structure in the export: a plain-text copy of a bulleted or
     // task list must still read as a list.
     fun itemPrefix(item: ListItem, ordinal: Int): String {
-        // Task marker wins: "[x] " / "[ ] ".
-        var child: Node? = item.firstChild
-        while (child != null) {
-            if (child is TaskListItemMarker) {
-                return "[" + (if (child.isChecked) "x" else " ") + "] "
-            }
-            child = child.next
-        }
+        findTaskMarker(item)?.let { return "[" + (if (it.isChecked) "x" else " ") + "] " }
         // commonmark 0.30 keeps the marker on the parent list, not on a node
         // inside the item: BulletList.getMarker() and
         // OrderedList.getMarkerStartNumber() + getMarkerDelimiter().
@@ -149,6 +209,20 @@ fun markdownToPlainText(src: String): String {
                 }
                 is FencedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
                 is IndentedCodeBlock -> sb.append((cur.literal ?: "").trim()).append("\n\n")
+                is TableBlock -> { blocks(cur); sb.append('\n') }
+                is TableRow -> {
+                    var cell: Node? = cur.firstChild
+                    var first = true
+                    while (cell != null) {
+                        if (cell is TableCell) {
+                            if (!first) sb.append(" | ")
+                            inline(cell)
+                            first = false
+                        }
+                        cell = cell.next
+                    }
+                    sb.append('\n')
+                }
                 is TaskListItemMarker -> { }
                 else -> blocks(cur)
             }
@@ -312,6 +386,7 @@ private fun RenderBlock(node: Node, indent: Int, onLinkClick: (String) -> Unit, 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(6.dp))
         }
+        is TableBlock -> MarkdownTable(node, onLinkClick, scale)
         else -> {
             // HtmlBlock and anything unknown: render children only, never raw HTML.
             RenderBlocks(node, indent, onLinkClick, scale)
@@ -379,7 +454,137 @@ private fun CodeBlock(node: Node, code: String, scale: Float) {
 }
 
 @Composable
-private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Unit, scale: Float) {
+private fun MarkdownTable(block: TableBlock, onLinkClick: (String) -> Unit, scale: Float) {
+    val table = remember(block) { extractTable(block) }
+    if (table.rows.isEmpty() || table.colCount == 0) return
+    val headerBg = MaterialTheme.colorScheme.surfaceVariant
+    val surfaceBg = MaterialTheme.colorScheme.surface
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    val bodyColor = MaterialTheme.colorScheme.onBackground
+    val textDir = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TextDirection.Rtl else TextDirection.Ltr
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val minTableWidth = maxWidth
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = surfaceBg,
+            border = BorderStroke(1.dp, borderColor),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Layout(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                content = {
+                    repeat(table.headerRowCount) {
+                        Box(Modifier.background(headerBg))
+                    }
+                    repeat((table.rows.size - 1).coerceAtLeast(0)) {
+                        Box(Modifier.background(borderColor))
+                    }
+                    for (r in table.rows.indices) {
+                        val isHeaderRow = r < table.headerRowCount
+                        for (c in 0 until table.colCount) {
+                            val cell = table.rows[r][c]
+                            if (cell == null) {
+                                Box(Modifier.size(0.dp))
+                            } else {
+                                val align = when (cell.alignment) {
+                                    TableCell.Alignment.LEFT -> TextAlign.Left
+                                    TableCell.Alignment.CENTER -> TextAlign.Center
+                                    TableCell.Alignment.RIGHT -> TextAlign.Right
+                                    null -> TextAlign.Start
+                                }
+                                Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                    LinkedText(
+                                        node = cell,
+                                        style = TextStyle(
+                                            fontSize = 15.sp * scale,
+                                            lineHeight = 22.sp * scale,
+                                            fontWeight = if (isHeaderRow || cell.isHeader) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = bodyColor,
+                                            textAlign = align,
+                                            textDirection = textDir,
+                                        ),
+                                        onLinkClick = onLinkClick,
+                                        scale = scale,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            ) { measurables, _ ->
+                val rowCount = table.rows.size
+                val colCount = table.colCount
+                val headerCount = table.headerRowCount
+                val dividerCount = (rowCount - 1).coerceAtLeast(0)
+                val dividerOffset = headerCount
+                val cellOffset = headerCount + dividerCount
+
+                val minColPx = 72.dp.roundToPx()
+                val maxColPx = (240f * scale.coerceAtLeast(1f)).dp.roundToPx()
+                val minTablePx = minTableWidth.roundToPx()
+                val dividerPx = 1.dp.roundToPx().coerceAtLeast(1)
+
+                val colWidths = IntArray(colCount) { c ->
+                    var maxW = minColPx
+                    for (r in 0 until rowCount) {
+                        val w = measurables[cellOffset + r * colCount + c].maxIntrinsicWidth(Int.MAX_VALUE)
+                        if (w > maxW) maxW = w
+                    }
+                    maxW.coerceIn(minColPx, maxColPx)
+                }
+                val naturalWidth = colWidths.sum()
+                if (naturalWidth < minTablePx) {
+                    val extra = minTablePx - naturalWidth
+                    val perCol = extra / colCount
+                    for (c in 0 until colCount) colWidths[c] += perCol
+                    colWidths[colCount - 1] += extra - perCol * colCount
+                }
+                val tableWidth = colWidths.sum()
+
+                val cellPlaceables = Array(rowCount * colCount) { idx ->
+                    val c = idx % colCount
+                    measurables[cellOffset + idx].measure(Constraints(minWidth = colWidths[c], maxWidth = colWidths[c]))
+                }
+                val rowHeights = IntArray(rowCount) { r ->
+                    (0 until colCount).maxOf { c -> cellPlaceables[r * colCount + c].height }.coerceAtLeast(1)
+                }
+                val headerPlaceables = Array(headerCount) { h ->
+                    measurables[h].measure(Constraints.fixed(tableWidth, rowHeights[h]))
+                }
+                val dividerPlaceables = Array(dividerCount) { d ->
+                    measurables[dividerOffset + d].measure(Constraints.fixed(tableWidth, dividerPx))
+                }
+                val tableHeight = rowHeights.sum() + dividerCount * dividerPx
+
+                layout(tableWidth, tableHeight) {
+                    var headerY = 0
+                    for (h in 0 until headerCount) {
+                        headerPlaceables[h].placeRelative(0, headerY)
+                        headerY += rowHeights[h] + dividerPx
+                    }
+                    var y = 0
+                    for (r in 0 until rowCount) {
+                        var x = 0
+                        for (c in 0 until colCount) {
+                            cellPlaceables[r * colCount + c].placeRelative(x, y)
+                            x += colWidths[c]
+                        }
+                        y += rowHeights[r]
+                        if (r < rowCount - 1) {
+                            dividerPlaceables[r].placeRelative(0, y)
+                            y += dividerPx
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+}
+
+@Composable
+private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Unit, scale: Float, modifier: Modifier = Modifier) {
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
     val annotated = remember(node, linkColor, codeBg, scale) { inlineAnnotated(node, linkColor, codeBg, scale) }
@@ -389,7 +594,7 @@ private fun LinkedText(node: Node, style: TextStyle, onLinkClick: (String) -> Un
     ClickableText(
         text = annotated,
         onTextLayout = { measured.layout = it },
-        modifier = Modifier.onGloballyPositioned { coordinates ->
+        modifier = modifier.onGloballyPositioned { coordinates ->
             measured.layout?.let { anchors?.update(node, it, coordinates) }
         },
         style = style,

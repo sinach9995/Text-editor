@@ -27,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
@@ -45,19 +47,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The tab strip: one tab per open document, inside the header band.
+ * Horizontal document tab strip inside the header band.
  *
- * The home screen is not a tab. It used to be pinned at the head of the strip,
- * which cost a slot and pushed the open documents aside; the app icon in the
- * header is the way back to it instead, and the strip only ever holds documents.
- *
- * The active tab is a cut-out of the page, not a chip floating on the bar: it
- * takes the page colour, starts where the top bar ends, drops its bottom
- * corners for two concave feet that bend into the text below, and is drawn per
- * tab, so the feet travel with the tab as the strip scrolls.
- *
- * Deliberately thin: it renders [TabState] snapshots and reports intent, so all
- * the state lives in the ViewModel and none of it is duplicated here.
+ * The active tab uses [MergedTabShape] so its bottom corners flare smoothly onto the page edge.
  */
 @Composable
 fun TabStrip(
@@ -125,22 +117,28 @@ private fun TabChip(
     // to flare outwards; content is pushed in by the same amount to stay centred
     // in the visible body.
     val inset = if (active) FOOT else 0.dp
+    val accentColor = MaterialTheme.colorScheme.primary
     Column(
         modifier = Modifier
             .height(height)
             .clip(shape)
             .background(background)
+            .then(
+                if (active) Modifier.drawWithContent {
+                    drawContent()
+                    val insetPx = inset.toPx()
+                    val width = (size.width - insetPx * 2f).coerceAtLeast(0f)
+                    if (width > 0f) {
+                        drawRect(
+                            color = accentColor,
+                            topLeft = Offset(insetPx, 0f),
+                            size = Size(width, 2.dp.toPx()),
+                        )
+                    }
+                } else Modifier
+            )
             .clickable(onClick = onSelect),
     ) {
-        if (active) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = inset)
-                    .height(2.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
         Row(
             modifier = Modifier.weight(1f).padding(start = 12.dp + inset, end = 6.dp + inset),
             verticalAlignment = Alignment.CenterVertically,

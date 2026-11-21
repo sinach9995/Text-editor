@@ -4,13 +4,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "app/src/main/java/com/asoraksh/hermeseditor/MainActivity.kt"
+HELP = ROOT / "app/src/main/java/com/asoraksh/hermeseditor/HelpAndOnboarding.kt"
 EN = ROOT / "app/src/main/res/values/strings.xml"
 FA = ROOT / "app/src/main/res/values-fa/strings.xml"
 
 
 class OnboardingContract(unittest.TestCase):
     def test_replaces_auto_dismissed_hints_with_four_steps(self):
-        code = SOURCE.read_text(encoding='utf-8')
+        code = SOURCE.read_text(encoding='utf-8') + "\n" + HELP.read_text(encoding='utf-8')
         self.assertNotIn('"zoom_hint_seen"', code)
         self.assertNotIn('"save_hint_seen"', code)
         self.assertIn('onboarding_language_chosen', code)
@@ -21,7 +22,7 @@ class OnboardingContract(unittest.TestCase):
         self.assertIn('onboardingStep >= 3', code)
 
     def test_guide_is_replayable_and_kept_clear_of_bottom_controls(self):
-        code = SOURCE.read_text(encoding='utf-8')
+        code = SOURCE.read_text(encoding='utf-8') + "\n" + HELP.read_text(encoding='utf-8')
         self.assertIn('onboarding_replay', code)
         self.assertIn('contentAlignment = Alignment.BottomCenter', code)
         self.assertIn('top = 120.dp, end = 24.dp, bottom = 270.dp', code)

@@ -8,7 +8,7 @@ Hermes Text Editor is made for distraction-free writing: open a file, write comf
 
 - Create plain-text (`.txt`) and Markdown (`.md`) documents
 - Open `.txt`, `.md`, and `.markdown` files with Android's system file picker
-- Open supported files directly from your Android file manager
+- Open supported files directly from your Android file manager or other apps (such as Telegram); when an external app grants only temporary access, Hermes keeps an app-private copy while the file stays open or on Recent
 - Save the current document normally, with clear save and error feedback
 - Press and hold the floppy icon (bottom-right corner) to use:
   - **Save as…** — save a copy with a new filename, folder, or `.txt` / `.md` extension while preserving the exact original content
@@ -17,8 +17,8 @@ Hermes Text Editor is made for distraction-free writing: open a file, write comf
 - Up to ten open documents in a tab strip; each tab keeps its own unsaved draft, scroll position, Markdown preview mode and writing direction
 - **Undo** and **Redo** using compact floating controls; history is local and bounded, and rapid typing is grouped into practical undo steps
 - **Find in current document** with match highlighting, current/total result count, and previous/next navigation
-- **Two-finger text zoom** in the editor and Markdown Preview; your selected text size is stored locally
-- Markdown Preview for headings, emphasis, lists, links, quotes, code blocks, and more
+- **Two-finger text zoom** in the editor and Markdown Preview, plus a **Font size** (`−` / `+`) stepper in the three-dot menu; your selected text size is stored locally
+- Markdown Preview for headings, tables, emphasis, lists, task lists, links, quotes, code blocks, and more
 - Live styled Markdown source editing: Markdown symbols remain visible and editable while the source receives readable visual styling
 - Long filenames stay on one tab line and can be swiped sideways to reveal the full name
 - Light and Dark themes
@@ -33,7 +33,9 @@ Existing Markdown files open in **Preview** mode for comfortable reading. Use th
 
 Markdown source remains unchanged when you edit or save it. Source mode adds visual styling for common Markdown elements while keeping syntax visible and editable. New Markdown documents open in source-editing mode.
 
-If you need a readable text-only copy, press and hold the floppy icon and choose **Export as plain text…**. The original Markdown file is not changed.
+GitHub-style Markdown tables render in **Preview** with aligned columns, inline formatting, RTL support, and horizontal scrolling when a table is wider than the screen.
+
+If you need a readable text-only copy, press and hold the floppy icon and choose **Export as plain text…**. Tables are formatted cleanly row by row, and the original Markdown file is not changed.
 
 ## Find, Undo, and Redo
 
@@ -90,7 +92,7 @@ The top of the screen is one band: the app icon, then the tabs, then a round men
 
 The page opens with the app name over the word **Recent** and a rule across the width under them; everything below the rule is the list. New and Open sit under the rule, and beneath them every document open right now followed by the files this app has opened, newest first. A restored tab is listed too: a document you have open is recent by definition. Press and hold a closed entry on the list to forget it.
 
-Grants matter here. A file opened from Recent is read through a permission this app was given when the file was first picked, so that permission is kept while a list entry still points at the file, and handed back when the entry is pushed off the end (the list keeps twelve) or the row turns out to be unreadable. Closing the last tab lands on Recent with an empty strip rather than leaving a blank document behind.
+Grants matter here. A file opened from Recent is read through a permission this app was given when the file was first picked, so that permission is kept while a list entry still points at the file, and handed back when the entry is pushed off the end (the list keeps twelve) or the row turns out to be unreadable. When another app (such as Telegram) grants only temporary access that expires once both apps close, Hermes keeps an app-private copy so the tab and Recent entry continue working offline, and deletes that copy automatically once the file is no longer open or listed in Recent. Closing the last tab lands on Recent with an empty strip rather than leaving a blank document behind.
 
 ## Tabs
 

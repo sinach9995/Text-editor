@@ -58,21 +58,7 @@ private fun vector(kind: ControlIcon): ImageVector = ImageVector.Builder(kind.na
     }
 }
 
-/**
- * The document actions, as a column in the bottom-right corner instead of a
- * full-width bar along the bottom.
- *
- * A bar cost 60dp of height on every screen, all the time, for five actions that
- * are used in bursts. A column costs the right edge, where there is no text to
- * cover, and it is one-handed reach.
- *
- * The set is not fixed. While the keyboard is up, New and Open are hidden: they
- * are not things you do mid-sentence, and they were the two buttons that pushed
- * the column over the cursor. In landscape with the keyboard up there is no
- * vertical room left at all, so the three that remain lie down in a row.
- */
-// The dots are 15% larger than the first cut: at 40dp with a 22dp glyph the
-// column read as decoration rather than buttons on a tall phone.
+/** Corner action stack: 5 buttons at rest, or 3 editing buttons in a row while the keyboard is up. */
 private val DOT = 46.dp
 private val GLYPH = 25.dp
 private val HISTORY_GLYPH = 23.dp

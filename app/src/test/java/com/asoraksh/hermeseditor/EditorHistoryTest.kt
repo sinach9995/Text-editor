@@ -1,13 +1,17 @@
 package com.asoraksh.hermeseditor
 
-fun main() {
-    fun expect(condition: Boolean, message: String) { if (!condition) throw AssertionError(message) }
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
-    // 1-4: rapid typing run coalesces; one Undo -> "Hello", one Redo -> "Hello world"
-    run {
+class EditorHistoryTest {
+
+    @Test
+    fun `rapid typing run coalesces into one undo step and redoes`() {
         val h = EditorHistory()
         val base = EditorSnapshot("Hello", 5, 5)
-        h.reset(base)
+        h.reset()
         var current = base
         var t = 1000L
         for (ch in " world") {
@@ -16,19 +20,20 @@ fun main() {
             t += 50
             current = next
         }
-        expect(current.text == "Hello world", "typing built Hello world")
+        assertEquals("Hello world", current.text)
         val undone = h.undo(current)!!
-        expect(undone.text == "Hello", "one Undo returns to Hello, got '${undone.text}'")
+        assertEquals("Hello", undone.text)
         val redone = h.redo(undone)!!
-        expect(redone.text == "Hello world", "one Redo returns to Hello world, got '${redone.text}'")
-        expect(redone.start == 11 && redone.end == 11, "selection restored to end")
+        assertEquals("Hello world", redone.text)
+        assertEquals(11, redone.start)
+        assertEquals(11, redone.end)
     }
 
-    // 5: rapid consecutive backspace run coalesces; one Undo -> "Hello"
-    run {
+    @Test
+    fun `rapid consecutive backspace run coalesces into one undo step`() {
         val h = EditorHistory()
         val base = EditorSnapshot("Hello world", 11, 11)
-        h.reset(base)
+        h.reset()
         var current = base
         var t = 1000L
         while (current.text != "Hello") {
@@ -38,16 +43,16 @@ fun main() {
             current = next
         }
         val undone = h.undo(current)!!
-        expect(undone.text == "Hello world", "Undo restores all deleted characters, got '${undone.text}'")
+        assertEquals("Hello world", undone.text)
         val redone = h.redo(undone)!!
-        expect(redone.text == "Hello", "Redo reapplies all deletions, got '${redone.text}'")
+        assertEquals("Hello", redone.text)
     }
 
-    // 6: pause creates a separate Undo step
-    run {
+    @Test
+    fun `pause longer than coalesce window splits undo steps`() {
         val h = EditorHistory()
         val base = EditorSnapshot("Hello", 5, 5)
-        h.reset(base)
+        h.reset()
         var current = base
         var t = 1000L
         for (ch in " wo") {
@@ -56,24 +61,24 @@ fun main() {
             t += 50
             current = next
         }
-        t += 5000 // pause longer than COALESCE_MILLIS
+        t += 5000
         for (ch in "rld") {
             val next = EditorSnapshot(current.text + ch, current.text.length + 1, current.text.length + 1)
             h.record(EditorSnapshot(current.text, current.start, current.end), next, t)
             t += 50
             current = next
         }
-        expect(current.text == "Hello world", "built Hello world with pause")
+        assertEquals("Hello world", current.text)
         val first = h.undo(current)!!
-        expect(first.text == "Hello wo", "pause split run: first undo -> 'Hello w', got '${first.text}'")
+        assertEquals("Hello wo", first.text)
         val second = h.undo(first)!!
-        expect(second.text == "Hello", "second undo -> Hello, got '${second.text}'")
+        assertEquals("Hello", second.text)
     }
 
-    // Long run (30 chars): the reported bug scenario — must stay ONE step
-    run {
+    @Test
+    fun `long rapid typing run undoes in one step`() {
         val h = EditorHistory()
-        h.reset(EditorSnapshot("Hello", 5, 5))
+        h.reset()
         var current = EditorSnapshot("Hello", 5, 5)
         var t = 1000L
         repeat(30) {
@@ -82,14 +87,13 @@ fun main() {
             t += 40
             current = next
         }
-        val undone = h.undo(current)!!
-        expect(undone.text == "Hello", "30-char rapid run undoes in ONE step, got '${undone.text}'")
+        assertEquals("Hello", h.undo(current)!!.text)
     }
 
-    // Paste (multi-char) is its own step and must not merge into adjacent typing
-    run {
+    @Test
+    fun `paste stays a separate undo step from adjacent typing`() {
         val h = EditorHistory()
-        h.reset(EditorSnapshot("Hello", 5, 5))
+        h.reset()
         var current = EditorSnapshot("Hello", 5, 5)
         var t = 1000L
         for (ch in " wo") {
@@ -100,14 +104,13 @@ fun main() {
         }
         val pasted = EditorSnapshot("Hello wo pasted", 15, 15)
         h.record(EditorSnapshot(current.text, current.start, current.end), pasted, t + 50)
-        val undone = h.undo(pasted)!!
-        expect(undone.text == "Hello wo", "paste undoes alone, got '${undone.text}'")
+        assertEquals("Hello wo", h.undo(pasted)!!.text)
     }
 
-    // Undo/redo reset the run; new edit after undo is a fresh step, redo cleared
-    run {
+    @Test
+    fun `edit after undo clears redo stack and starts a fresh step`() {
         val h = EditorHistory()
-        h.reset(EditorSnapshot("Hello", 5, 5))
+        h.reset()
         var current = EditorSnapshot("Hello", 5, 5)
         var t = 1000L
         for (ch in " ab") {
@@ -117,50 +120,52 @@ fun main() {
             current = next
         }
         val undone = h.undo(current)!!
-        expect(undone.text == "Hello", "run undone")
+        assertEquals("Hello", undone.text)
         val newType = EditorSnapshot("Hello!", 6, 6)
         h.record(EditorSnapshot(undone.text, undone.start, undone.end), newType, t + 100)
-        expect(!h.canRedo, "new edit after undo clears redo")
-        val secondUndo = h.undo(newType)!!
-        expect(secondUndo.text == "Hello", "edit after undo starts fresh step, got '${secondUndo.text}'")
+        assertFalse(h.canRedo)
+        assertEquals("Hello", h.undo(newType)!!.text)
     }
 
-    // Selection-only update never creates an entry and ends the coalescing run
-    run {
+    @Test
+    fun `selection-only update creates no entry and ends coalescing run`() {
         val h = EditorHistory()
-        h.reset(EditorSnapshot("Hello", 5, 5))
+        h.reset()
         val step1 = EditorSnapshot("Hello ", 6, 6)
         h.record(EditorSnapshot("Hello", 5, 5), step1, 1000)
-        // Cursor move: text unchanged
         h.record(EditorSnapshot("Hello ", 3, 3), EditorSnapshot("Hello ", 4, 5), 1050)
         val nextType = EditorSnapshot("Hello w", 7, 7)
         h.record(EditorSnapshot("Hello ", 6, 6), nextType, 1100)
         val undone = h.undo(nextType)!!
-        expect(undone.text == "Hello ", "selection-only broke the run (separate step), got '${undone.text}'")
-        expect(undone.start == 6 && undone.end == 6, "selection restored from snapshot")
-        expect(h.undo(undone) == EditorSnapshot("Hello", 5, 5), "original typing step preserved")
-        expect(!h.canUndo, "selection-only itself created no entry")
+        assertEquals("Hello ", undone.text)
+        assertEquals(6, undone.start)
+        assertEquals(6, undone.end)
+        assertEquals(EditorSnapshot("Hello", 5, 5), h.undo(undone))
+        assertFalse(h.canUndo)
     }
 
-    // Bounded entries and characters still enforced
-    run {
+    @Test
+    fun `bounded entries cap is enforced`() {
         val small = EditorHistory(maxEntries = 3, maxTotalChars = 400)
-        small.reset(EditorSnapshot("", 0, 0))
+        small.reset()
         var current = EditorSnapshot("", 0, 0)
         var t = 0L
         for (i in 1..10) {
             val next = EditorSnapshot(current.text + "chunk$i".repeat(2), current.text.length, current.text.length)
             small.record(EditorSnapshot(current.text, current.start, current.end), next, t)
-            t += 5000 // pause: each chunk is its own entry
+            t += 5000
             current = next
         }
         var steps = 0
-        while (small.canUndo) { small.undo(current); steps++ }
-        expect(steps <= 3, "bounded entries, was $steps")
+        while (small.canUndo) {
+            small.undo(current)
+            steps++
+        }
+        assertTrue("bounded entries expected <= 3, was $steps", steps <= 3)
     }
 
-    // Save As ends the run but retains the earliest undo snapshot.
-    run {
+    @Test
+    fun `breakCoalescing splits typing run while retaining history`() {
         val h = EditorHistory()
         val base = EditorSnapshot("Hello", 5, 5)
         val first = EditorSnapshot("Hello!", 6, 6)
@@ -168,11 +173,12 @@ fun main() {
         h.record(base, first, 1000)
         h.breakCoalescing()
         h.record(first, next, 1050)
-        expect(h.undo(next) == first, "Save As splits typing run")
-        expect(h.undo(first) == base, "Save As retains history")
+        assertEquals(first, h.undo(next))
+        assertEquals(base, h.undo(first))
     }
-    // Even a one-character clipboard paste is a boundary on both sides.
-    run {
+
+    @Test
+    fun `single-character paste stays separate on both sides`() {
         val h = EditorHistory()
         val base = EditorSnapshot("Hello", 5, 5)
         val typed = EditorSnapshot("Hello!", 6, 6)
@@ -181,12 +187,13 @@ fun main() {
         h.record(base, typed, 1000)
         h.record(typed, pasted, 1050, allowCoalescing = false)
         h.record(pasted, next, 1100)
-        expect(h.undo(next) == pasted, "typing after paste separate")
-        expect(h.undo(pasted) == typed, "single-character paste separate")
-        expect(h.undo(typed) == base, "typing before paste preserved")
+        assertEquals(pasted, h.undo(next))
+        assertEquals(typed, h.undo(pasted))
+        assertEquals(base, h.undo(typed))
     }
-    // Redo and document reset both end a run.
-    run {
+
+    @Test
+    fun `redo and reset both end a coalescing run`() {
         val h = EditorHistory()
         val base = EditorSnapshot("Hello", 5, 5)
         val first = EditorSnapshot("Hello!", 6, 6)
@@ -195,19 +202,21 @@ fun main() {
         h.redo(base)
         val next = EditorSnapshot("Hello!!", 7, 7)
         h.record(first, next, 1050)
-        expect(h.undo(next) == first, "Redo ends previous run")
-        h.reset(base)
-        expect(!h.canUndo && !h.canRedo, "new document clears old history")
+        assertEquals(first, h.undo(next))
+        h.reset()
+        assertFalse(h.canUndo)
+        assertFalse(h.canRedo)
         h.record(base, first, 1100)
-        expect(h.undo(first) == base, "new document run has its own base")
+        assertEquals(base, h.undo(first))
     }
 
-    // findMatches (offset preservation)
-    expect(findMatches("", "x").isEmpty() && findMatches("abc", "").isEmpty(), "empty inputs")
-    val m = findMatches("Abc abc ABc", "abc")
-    expect(m.size == 3 && m[0] == 0..2 && m[1] == 4..6 && m[2] == 8..10, "case-insensitive ranges")
-    val persian = findMatches("سلام دنیا سلام", "سلام")
-    expect(persian.size == 2, "persian matches")
-    expect(findMatches("aaa", "aa").size == 1, "non-overlapping")
-    println("ALL UNDO/REDO REGRESSION TESTS PASSED")
+    @Test
+    fun `findMatches finds non-overlapping case-insensitive UTF-16 ranges`() {
+        assertTrue(findMatches("", "x").isEmpty())
+        assertTrue(findMatches("abc", "").isEmpty())
+        val m = findMatches("Abc abc ABc", "abc")
+        assertEquals(listOf(0..2, 4..6, 8..10), m)
+        assertEquals(2, findMatches("سلام دنیا سلام", "سلام").size)
+        assertEquals(1, findMatches("aaa", "aa").size)
+    }
 }

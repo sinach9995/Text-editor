@@ -486,29 +486,15 @@ class EditorViewModel : ViewModel() {
         scope.launch {
             val draft = withContext(Dispatchers.IO) { readDraft(tab) }
             if (token != tab.loadToken || !_tabs.contains(tab)) return@launch
-            if (draft != null) {
-                applyText(tab, draft, dirty = true)
-                // The legacy source is now this tab's own draft file; never
-                // seed another tab from it.
-                pendingLegacyText = null
-                legacyDraftFile = null
-                tab.loading = false
-                bumpSession()
-                persistManifest()
-                return@launch
-            }
             val uri = tab.uri
-            if (uri == null) {
-                applyText(tab, "", dirty = false)
-                tab.loading = false
-                return@launch
+            val resolved = resolveHydration(draft, uri != null) {
+                val u = uri!!
+                withContext(Dispatchers.IO) { runCatching { reader?.invoke(u) }.getOrNull() }
             }
-            val text = withContext(Dispatchers.IO) { runCatching { reader?.invoke(uri) }.getOrNull() }
             if (token != tab.loadToken || !_tabs.contains(tab)) return@launch
             tab.loading = false
-            if (text == null) {
-                // Grant expired or the file is gone: drop the identity but keep
-                // the tab, so no other tab's work is disturbed.
+            if (resolved == null) {
+                // Unreachable uri: keep the tab clean without disturbing other tabs.
                 tab.uri = null
                 applyText(tab, "", dirty = false)
                 tab.title = UNTOOLED_TXT
@@ -516,7 +502,11 @@ class EditorViewModel : ViewModel() {
                 persistManifest()
                 return@launch
             }
-            applyText(tab, text, dirty = false)
+            applyText(tab, resolved.text, dirty = resolved.dirty)
+            if (draft != null) {
+                pendingLegacyText = null
+                legacyDraftFile = null
+            }
             bumpSession()
             persistManifest()
         }
