@@ -68,7 +68,8 @@ class MarkdownTableTest {
         assertEquals(TableCell.Alignment.CENTER, table.rows[0][1]?.alignment)
         assertEquals(TableCell.Alignment.RIGHT, table.rows[0][2]?.alignment)
         assertEquals("two", plain(table.rows[1][1]))
-        assertNull(table.rows[1][2])
+        assertEquals("", plain(table.rows[1][2]))
+        assertEquals(TableCell.Alignment.RIGHT, table.rows[1][2]?.alignment)
     }
 
     @Test
