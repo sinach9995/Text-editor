@@ -293,8 +293,8 @@ check("Help dialog aligns system bar icon appearance with light/dark theme",
       and "isAppearanceLightStatusBars" in MAIN)
 
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)
-check("versionCode was bumped past 1.6.8", "versionCode = 16" in GRADLE)
+check("versionName is 1.7.1", 'versionName = "1.7.1"' in GRADLE)
+check("versionCode was bumped to 17", "versionCode = 17" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover codec, reader, history, and anchors",

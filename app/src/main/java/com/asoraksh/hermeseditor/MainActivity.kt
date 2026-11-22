@@ -941,7 +941,7 @@ class MainActivity : ComponentActivity() {
         MaterialTheme(colorScheme = colors) {
             val showingRecent = vm.home && !showOnboarding
             val versionName = remember {
-                try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7.0" } catch (_: Exception) { "1.7.0" }
+                try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7.1" } catch (_: Exception) { "1.7.1" }
             }
             BackHandler {
                 when {

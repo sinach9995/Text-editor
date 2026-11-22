@@ -18,6 +18,7 @@ Hermes Text Editor is made for distraction-free writing: open a file, write comf
 - **Undo** and **Redo** using compact floating controls; history is local and bounded, and rapid typing is grouped into practical undo steps
 - **Find in current document** with match highlighting, current/total result count, and previous/next navigation
 - **Two-finger text zoom** in the editor and Markdown Preview, plus a **Font size** (`−` / `+`) stepper in the three-dot menu; your selected text size is stored locally
+- Draggable **fast scrollbar** on the edge opposite the corner action buttons for quickly scrolling through long documents in Edit and Markdown Preview
 - Markdown Preview for headings, tables, emphasis, lists, task lists, links, quotes, code blocks, and more
 - Live styled Markdown source editing: Markdown symbols remain visible and editable while the source receives readable visual styling
 - Long filenames stay on one tab line and can be swiped sideways to reveal the full name
@@ -106,8 +107,8 @@ Up to ten documents can stay open, and the app refuses new tabs once the combine
 
 ## Current version
 
-- **Version:** 1.7.0
-- **Version code:** 16
+- **Version:** 1.7.1
+- **Version code:** 17
 - **Package:** `com.asoraksh.hermeseditor`
 
 ## Independent project notice
