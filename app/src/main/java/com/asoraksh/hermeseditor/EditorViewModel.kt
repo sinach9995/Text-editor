@@ -349,6 +349,7 @@ class EditorViewModel : ViewModel() {
     /** Called by the Activity when a session starts: applies the preview default once. */
     fun beginSession(markdownName: Boolean) {
         val tab = activeTab
+        val prevPreview = tab.mdPreview
         if (tab.forceSourceMode) {
             tab.mdPreview = false
             tab.forceSourceMode = false
@@ -356,6 +357,7 @@ class EditorViewModel : ViewModel() {
             tab.mdPreview = markdownName
         }
         tab.fresh = false
+        if (tab.mdPreview != prevPreview) persistManifest()
     }
 
     // --- persistence ------------------------------------------------------

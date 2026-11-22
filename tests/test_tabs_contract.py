@@ -237,8 +237,12 @@ check("closing the last tab lands on Recent, it does not open a blank one",
       'activeTabId = ""' in close_tab and "home = true" in close_tab)
 check("an empty session starts on Recent", "legacyDraft.isNullOrEmpty() && lastUri == null" in VM)
 check("an empty manifest is cleared instead of left to be restored", "s.clearManifest()" in VM)
-check("the Recent page covers the document instead of unmounting it",
-      "if (vm.home) RecentPage(" in MAIN)
+check("the Recent page covers the document instead of unmounting it and yields to the onboarding tour",
+      "val showingRecent = vm.home && !showOnboarding" in MAIN
+      and "if (showingRecent) RecentPage(" in MAIN
+      and "(!mdPreview || showOnboarding) && !showingRecent" in MAIN)
+check("beginSession persists initial Markdown preview state to manifest",
+      "persistManifest()" in body(VM, "fun beginSession("))
 check("Recent is inset below the header instead of starting at the window top",
       "modifier = Modifier.fillMaxSize().padding(innerPadding)," in MAIN)
 check("tapping the corner menu in a document tab leaves Recent",
@@ -289,8 +293,8 @@ check("Help dialog aligns system bar icon appearance with light/dark theme",
       and "isAppearanceLightStatusBars" in MAIN)
 
 # --- Version + CI ---------------------------------------------------------
-check("versionName is 1.7.0", 'versionName = "1.7.0"' in GRADLE)
-check("versionCode was bumped past 1.6.8", "versionCode = 16" in GRADLE)
+check("versionName is 1.7.1", 'versionName = "1.7.1"' in GRADLE)
+check("versionCode was bumped to 17", "versionCode = 17" in GRADLE)
 check("JVM unit tests are declared", 'testImplementation("junit:junit' in GRADLE)
 check("CI runs the JVM unit tests", "testDebugUnitTest" in WORKFLOW)
 check("JVM tests cover codec, reader, history, and anchors",
