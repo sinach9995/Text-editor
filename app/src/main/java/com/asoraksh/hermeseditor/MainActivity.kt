@@ -95,13 +95,41 @@ class MainActivity : ComponentActivity() {
         if (uri.scheme == "file") ownedImportFile(uri)?.let { java.io.FileInputStream(it) }
         else contentResolver.openInputStream(uri)
 
+    private fun openWritableStream(uri: Uri): java.io.OutputStream {
+        var lastError: Throwable? = null
+        // Providers such as OEM file managers and cloud storage occasionally reject "wt" on new CreateDocument URIs.
+        for (mode in listOf("wt", "rwt", "w")) {
+            try {
+                val stream = contentResolver.openOutputStream(uri, mode)
+                if (stream != null) return stream
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: java.io.IOException("Could not open output stream")
+    }
+
     private fun writeTextToUri(uri: Uri, text: String) {
         ownedImportFile(uri)?.let {
             ImportedFiles.writeAtomic(it, text)
             return
         }
-        requireNotNull(contentResolver.openOutputStream(uri, "wt"))
-            .bufferedWriter(Charsets.UTF_8).use { it.write(text) }
+        openWritableStream(uri).bufferedWriter(Charsets.UTF_8).use {
+            it.write(text)
+            it.flush()
+        }
+    }
+
+    private fun cleanupEmptyCreatedDocument(uri: Uri) {
+        runCatching {
+            val size = contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                    if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else null
+                } else null
+            }
+            if (size == 0L) android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
+        }
     }
 
     /**
@@ -116,15 +144,13 @@ class MainActivity : ComponentActivity() {
         val readGranted = try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             true
-        } catch (_: SecurityException) {
+        } catch (_: Exception) {
             runCatching {
                 contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
             }.getOrDefault(false)
-        } catch (_: IllegalArgumentException) {
-            false
         }
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-        catch (_: SecurityException) { }
+        catch (_: Exception) { }
         return readGranted
     }
 
@@ -277,14 +303,21 @@ class MainActivity : ComponentActivity() {
         val tabId = takeSaveTabId()
         lifecycleScope.launch {
             val raw = vm.awaitTextOf(tabId) ?: run {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    cleanupEmptyCreatedDocument(target)
+                }
                 notifyMessage(getString(R.string.save_failed))
                 return@launch
             }
             val plain = markdownToPlainText(raw)
-            val ok = withContext(Dispatchers.IO) {
+            val ok = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
                 runCatching {
-                    requireNotNull(contentResolver.openOutputStream(target, "wt"))
-                        .bufferedWriter(Charsets.UTF_8).use { w -> w.write(plain) }
+                    openWritableStream(target).bufferedWriter(Charsets.UTF_8).use { w ->
+                        w.write(plain)
+                        w.flush()
+                    }
+                }.also { res ->
+                    if (res.isFailure) cleanupEmptyCreatedDocument(target)
                 }.isSuccess
             }
             notifyMessage(
@@ -392,11 +425,18 @@ class MainActivity : ComponentActivity() {
         takePersistablePermissions(uri)
         lifecycleScope.launch {
             val draft = vm.awaitTextOf(tabId) ?: run {
+                if (saveAs) {
+                    withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                        cleanupEmptyCreatedDocument(uri)
+                    }
+                }
                 notifyMessage(getString(R.string.save_failed))
                 return@launch
             }
-            val result: Result<Unit> = withContext(Dispatchers.IO) {
-                runCatching { writeTextToUri(uri, draft) }
+            val result: Result<Unit> = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                runCatching { writeTextToUri(uri, draft) }.also { res ->
+                    if (saveAs && res.isFailure) cleanupEmptyCreatedDocument(uri)
+                }
             }
             val failure = result.exceptionOrNull()
             if (failure != null) {
@@ -730,7 +770,7 @@ class MainActivity : ComponentActivity() {
                     if (visibleTop < topMargin || visibleBottom > viewportHeight - bottomMargin) {
                         cursorVisibilityRequest = true
                         try {
-                            cursorRequester.bringIntoView(rect.inflate(topMargin))
+                            runCatching { cursorRequester.bringIntoView(rect.inflate(topMargin)) }
                         } finally {
                             cursorVisibilityRequest = false
                         }
@@ -893,6 +933,11 @@ class MainActivity : ComponentActivity() {
                 keyboardController?.hide()
             }
         }
+        fun launchSaf(errorRes: Int, action: () -> Unit) {
+            keyboardController?.hide()
+            focusManager.clearFocus(force = true)
+            runCatching(action).onFailure { notifyMessage(getString(errorRes)) }
+        }
         MaterialTheme(colorScheme = colors) {
             val versionName = remember {
                 try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7.0" } catch (_: Exception) { "1.7.0" }
@@ -1050,6 +1095,17 @@ class MainActivity : ComponentActivity() {
                     }
                     }
                 }
+                val activeScroll = if (isMarkdownName(title) && mdPreview) previewScroll else editorScroll
+                if (!vm.home && vm.tabs.isNotEmpty() && viewportHeight > 0 && activeScroll.maxValue > 0) {
+                    DocumentScrollbar(
+                        scrollState = activeScroll,
+                        viewportHeightPx = viewportHeight,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxHeight()
+                            .padding(top = if (finding) 76.dp else 10.dp, bottom = 10.dp),
+                    )
+                }
                 // The actions live in the corner, so nothing takes a full-width
                 // strip from the text. They are hidden behind Find and Markdown
                 // preview, where they would either cover the document or do
@@ -1063,10 +1119,10 @@ class MainActivity : ComponentActivity() {
                         canRedo = historyTick >= 0 && history.canRedo,
                         onSave = { vm.documentUri?.let { pendingSaveTabId = vm.activeTabId; saveToUri(it) } ?: run { showFormatChoice = true } },
                         onSaveAs = { history.breakCoalescing(); showFormatChoice = true },
-                        onExport = { pendingSaveTabId = vm.activeTabId; exportDocument.launch(baseName(title) + ".txt") },
+                        onExport = { pendingSaveTabId = vm.activeTabId; launchSaf(R.string.save_failed) { exportDocument.launch(baseName(title) + ".txt") } },
                         onNew = { newFile(false) },
                         onNewMarkdown = { newFile(true) },
-                        onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
+                        onOpen = { launchSaf(R.string.err_open) { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) } },
                         undo = { vm.undo() },
                         redo = { vm.redo() },
                     )
@@ -1092,7 +1148,7 @@ class MainActivity : ComponentActivity() {
                     files = recentList(),
                     openUris = vm.tabs.mapNotNull { it.uri?.toString() }.toSet(),
                     onNew = { newFile(false) },
-                    onOpen = { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) },
+                    onOpen = { launchSaf(R.string.err_open) { openDocument.launch(arrayOf("text/plain", "text/markdown", "text/*")) } },
                     onFile = { openRecent(it) },
                     onForget = ::forgetRecent,
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
@@ -1127,8 +1183,8 @@ class MainActivity : ComponentActivity() {
                 title = { Text(stringResource(R.string.saveas_title)) },
                 text = {
                     Column {
-                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); pendingSaveTabId = vm.activeTabId; createTxtDocument.launch(baseName(title) + ".txt") }) { Text(stringResource(R.string.saveas_txt)) }
-                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); pendingSaveTabId = vm.activeTabId; createMdDocument.launch(baseName(title) + ".md") }) { Text(stringResource(R.string.saveas_md)) }
+                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); pendingSaveTabId = vm.activeTabId; launchSaf(R.string.save_failed) { createTxtDocument.launch(baseName(title) + ".txt") } }) { Text(stringResource(R.string.saveas_txt)) }
+                        TextButton(onClick = { showFormatChoice = false; history.breakCoalescing(); pendingSaveTabId = vm.activeTabId; launchSaf(R.string.save_failed) { createMdDocument.launch(baseName(title) + ".md") } }) { Text(stringResource(R.string.saveas_md)) }
                     }
                 },
                 confirmButton = { },

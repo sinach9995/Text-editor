@@ -44,4 +44,13 @@ class ViewportFollowup(unittest.TestCase):
         self.assertIn('contentAlignment = Alignment.Center', controls)
         self.assertIn('Canvas(modifier)', controls)
         self.assertIn('CircleShape', controls)
+    def test_opposite_side_fast_scrollbar_wired_with_pinch_guard(self):
+        main = (ROOT / 'MainActivity.kt').read_text(encoding='utf-8')
+        scrollbar_path = ROOT / 'DocumentScrollbar.kt'
+        self.assertTrue(scrollbar_path.exists())
+        scrollbar = scrollbar_path.read_text(encoding='utf-8')
+        self.assertIn('DocumentScrollbar(', main)
+        self.assertIn('.align(Alignment.TopStart)', main)
+        self.assertIn('event.changes.count { it.pressed } >= 2', scrollbar)
+        self.assertTrue((Path(__file__).resolve().parents[1] / 'app/src/test/java/com/asoraksh/hermeseditor/DocumentScrollbarTest.kt').exists())
 if __name__ == '__main__': unittest.main()

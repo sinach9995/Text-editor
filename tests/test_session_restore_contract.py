@@ -237,6 +237,22 @@ check("local import file access enforces canonical path ownership boundary",
       and "ImportedFiles.delete(" in body(MAIN, "private fun releasePermission(")
       and (ROOT / "app/src/test/java/com/asoraksh/hermeseditor/ImportedFilesTest.kt").exists())
 
+# --- First-time CreateDocument save crash & 0-byte prevention ----------
+open_stream = body(MAIN, "private fun openWritableStream(")
+export_doc = body(MAIN, "private val exportDocument =")
+check("SAF output stream falls back across wt, rwt, and w modes",
+      all(mode in open_stream for mode in ('"wt"', '"rwt"', '"w"')))
+check("SAF save and export run under NonCancellable IO and clean up 0-byte failed creates",
+      "NonCancellable" in write_tab
+      and "NonCancellable" in export_doc
+      and "cleanupEmptyCreatedDocument(uri)" in write_tab
+      and "cleanupEmptyCreatedDocument(target)" in export_doc)
+check("picker launches clear editor focus and hide IME first",
+      "launchSaf(" in MAIN
+      and "createTxtDocument.launch(" in MAIN
+      and "launchSaf(R.string.save_failed) { createTxtDocument.launch(" in MAIN
+      and "launchSaf(R.string.save_failed) { createMdDocument.launch(" in MAIN)
+
 if failures:
     print(f"\n{len(failures)} contract(s) failed")
     sys.exit(1)

@@ -48,7 +48,7 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    implementation(platform("androidx.compose:compose-bom:2025.02.00"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.activity:activity-compose:1.9.2")
