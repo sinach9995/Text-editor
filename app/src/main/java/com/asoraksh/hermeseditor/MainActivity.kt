@@ -939,6 +939,7 @@ class MainActivity : ComponentActivity() {
             runCatching(action).onFailure { notifyMessage(getString(errorRes)) }
         }
         MaterialTheme(colorScheme = colors) {
+            val showingRecent = vm.home && !showOnboarding
             val versionName = remember {
                 try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7.0" } catch (_: Exception) { "1.7.0" }
             }
@@ -969,7 +970,7 @@ class MainActivity : ComponentActivity() {
                         onFontSize = ::applyFontSize,
                         tabs = vm.tabs,
                         activeTabId = vm.activeTabId,
-                        homeActive = vm.home,
+                        homeActive = showingRecent,
                         onSelectTab = ::selectTab,
                         onCloseTab = ::requestCloseTab,
                         onHome = { finding = false; vm.goHome(); focusManager.clearFocus() },
@@ -981,11 +982,11 @@ class MainActivity : ComponentActivity() {
                 Box(
                     Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
                         .onSizeChanged { viewportHeight = it.height }
-                        .then(if (vm.home) Modifier.clearAndSetSemantics { } else Modifier)
+                        .then(if (showingRecent) Modifier.clearAndSetSemantics { } else Modifier)
                 ) {
                 val docDirection = if (docRtl) TextDirection.Rtl else TextDirection.Ltr
                 val docAlign = if (docRtl) TextAlign.Right else TextAlign.Left
-                if (isMarkdownName(title) && mdPreview) {
+                if (isMarkdownName(title) && mdPreview && !showOnboarding) {
                     CompositionLocalProvider(LocalLayoutDirection provides if (docRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                         MarkdownPreview(
                             markdown = text,
@@ -1110,7 +1111,7 @@ class MainActivity : ComponentActivity() {
                 // strip from the text. They are hidden behind Find and Markdown
                 // preview, where they would either cover the document or do
                 // nothing useful.
-                if (!finding && !mdPreview && !vm.home) {
+                if (!finding && (!mdPreview || showOnboarding) && !showingRecent) {
                     FloatingActions(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 10.dp),
                         inRow = imeBottom > 0,
@@ -1144,7 +1145,7 @@ class MainActivity : ComponentActivity() {
                 // carry the window insets itself -- without this padding it
                 // started at the top of the window and the whole title block sat
                 // behind the header band.
-                if (vm.home) RecentPage(
+                if (showingRecent) RecentPage(
                     files = recentList(),
                     openUris = vm.tabs.mapNotNull { it.uri?.toString() }.toSet(),
                     onNew = { newFile(false) },
