@@ -4,3 +4,8 @@ keystore.properties
 local.properties
 **/build/
 /.gradle
+windows/node_modules/
+windows/src-tauri/target/
+windows/web/vendor/
+windows/web/assets/
+

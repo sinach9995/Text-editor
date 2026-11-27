@@ -79,6 +79,15 @@ Your files remain on your device. The app accesses a file only when you choose i
 
 - Android 6.0 (API 23) or later
 
+## Windows
+
+A lightweight offline Windows desktop edition lives in [`windows/`](windows) (built with Tauri v2 + Windows Edge WebView2):
+
+- Opens `.md`, `.markdown`, and `.txt` files directly in **Markdown Preview** (GFM tables, headings, lists, task lists, code blocks, Persian/RTL support) with instant switching to live-styled Markdown source (`Ctrl+E`)
+- Multi-tab workspace (up to 10 tabs, local draft recovery, Recent page), Find (`Ctrl+F`), Undo/Redo, font zoom (`Ctrl+Wheel` / `Ctrl+=` / `Ctrl+-`), Light/Dark themes, English/فارسی UI, atomic saves, **Save as…**, and **Export as plain text…**
+- Supports drag-and-drop and Windows **Open with** file association for `.md`, `.markdown`, and `.txt` (NSIS installer and portable `.exe`)
+
+
 ## The buttons
 
 The five document actions sit in a column in the bottom-right corner, as line icons rather than words in a bar: **Save** (floppy), **New** (page with a plus), **Open** (folder), **Undo** and **Redo**, in that order from the top down. Each one is a 46dp dot, so the target is bigger than the 40dp square it replaced.
