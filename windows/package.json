@@ -1,0 +1,19 @@
+{
+  "name": "hermes-text-editor-windows",
+  "version": "1.7.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:web": "node scripts/prepare-web.mjs",
+    "test": "node --test test/hermes-windows.test.mjs",
+    "preview": "node scripts/preview-server.mjs",
+    "icons": "tauri icon ../app/src/main/res/drawable/hermes_editor_icon.png -o src-tauri/icons",
+    "build:windows": "tauri build --bundles nsis"
+  },
+  "dependencies": {
+    "marked": "^15.0.7"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.3.0"
+  }
+}

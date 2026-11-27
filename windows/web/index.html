@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'">
+  <title>Hermes Text Editor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <!-- Single-band 52px Header -->
+    <header class="header-bar" id="header-bar">
+      <button id="home-btn" class="home-btn" type="button" aria-label="Recent">
+        <img src="assets/hermes_editor_icon.png" alt="" class="home-icon">
+      </button>
+
+      <div id="tab-strip" class="tab-strip" role="tablist" aria-label="Open documents"></div>
+
+      <div class="header-right">
+        <button id="mode-pill" class="mode-pill hidden" type="button"></button>
+        <div class="overflow-wrap">
+          <button id="more-btn" class="more-btn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </button>
+          <div id="more-menu" class="dropdown-menu hidden" role="menu">
+            <button class="menu-item" data-action="theme" type="button">
+              <span id="menu-theme-label"></span>
+              <img id="menu-theme-icon" class="menu-icon" src="assets/asora_theme_sun_minimal.png" alt="">
+            </button>
+            <button class="menu-item" data-action="lang" type="button">
+              <span id="menu-lang-label"></span>
+            </button>
+            <button class="menu-item doc-only" data-action="direction" type="button">
+              <span id="menu-dir-label"></span>
+            </button>
+            <button class="menu-item md-only" data-action="toggle-preview" type="button">
+              <span id="menu-preview-label"></span>
+            </button>
+            <button class="menu-item doc-only" data-action="find" type="button">
+              <span id="menu-find-label"></span>
+            </button>
+            <div class="menu-stepper">
+              <span id="menu-font-label" class="stepper-label"></span>
+              <button id="font-dec-btn" class="step-btn" type="button">−</button>
+              <span id="font-val" class="step-val">17</span>
+              <button id="font-inc-btn" class="step-btn" type="button">+</button>
+            </div>
+            <button class="menu-item doc-only" data-action="discard" type="button">
+              <span id="menu-discard-label"></span>
+            </button>
+            <div class="menu-divider"></div>
+            <button class="menu-item" data-action="help" type="button">
+              <span id="menu-help-label"></span>
+            </button>
+            <button class="menu-item" data-action="about" type="button">
+              <span id="menu-about-label"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Document Workspace -->
+    <main class="workspace" id="workspace">
+      <!-- Markdown Preview -->
+      <div id="preview-scroll" class="doc-scroll hidden">
+        <article id="preview-content" class="markdown-body"></article>
+      </div>
+
+      <!-- Source Editor (segmented prose + inline editable Markdown tables) -->
+      <div id="editor-scroll" class="doc-scroll">
+        <div id="editor-stage" class="editor-stage"></div>
+      </div>
+
+      <!-- Opposite-Side Draggable Fast Scrollbar -->
+      <div id="fast-scrollbar" class="fast-scrollbar hidden" aria-hidden="true">
+        <div id="fast-scrollbar-track" class="fast-scrollbar-track">
+          <div id="fast-scrollbar-thumb" class="fast-scrollbar-thumb"></div>
+        </div>
+      </div>
+
+      <!-- Floating Find Bar -->
+      <div id="find-bar" class="find-bar hidden" role="search">
+        <input id="find-input" class="find-input" type="text" autocomplete="off" spellcheck="false">
+        <span id="find-count" class="find-count"></span>
+        <button id="find-prev-btn" class="find-nav-btn" type="button" aria-label="Previous">&#x25B2;</button>
+        <button id="find-next-btn" class="find-nav-btn" type="button" aria-label="Next">&#x25BC;</button>
+        <button id="find-close-btn" class="find-nav-btn" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <!-- Corner Action Column -->
+      <div id="floating-actions" class="floating-actions">
+        <div class="action-wrap">
+          <button id="btn-save" class="fab-btn" type="button" title="Save (Ctrl+S, right-click for Save as)">
+            <svg viewBox="0 0 24 24" class="fab-svg" aria-hidden="true">
+              <path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 0v6h8V3M8 21v-7h8v7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <button id="btn-save-more" class="fab-sub-badge" type="button" aria-label="Save options">&#x25BE;</button>
+          <div id="save-menu" class="fab-popover hidden" role="menu">
+            <button id="pop-save-as" class="menu-item" type="button"></button>
+            <button id="pop-export-txt" class="menu-item" type="button"></button>
+          </div>
+        </div>
+
+        <div class="action-wrap">
+          <button id="btn-new" class="fab-btn" type="button" title="New (Ctrl+N, right-click for Markdown)">
+            <svg viewBox="0 0 24 24" class="fab-svg" aria-hidden="true">
+              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M12 11v6M9 14h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <button id="btn-new-more" class="fab-sub-badge" type="button" aria-label="New file options">&#x25BE;</button>
+          <div id="new-menu" class="fab-popover hidden" role="menu">
+            <button id="pop-new-txt" class="menu-item" type="button"></button>
+            <button id="pop-new-md" class="menu-item" type="button"></button>
+          </div>
+        </div>
+
+        <button id="btn-open" class="fab-btn" type="button" title="Open (Ctrl+O)">
+          <svg viewBox="0 0 24 24" class="fab-svg" aria-hidden="true">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
+        <button id="btn-undo" class="fab-btn" type="button" title="Undo (Ctrl+Z)">
+          <svg viewBox="0 0 24 24" class="fab-svg" aria-hidden="true">
+            <path d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
+        <button id="btn-redo" class="fab-btn" type="button" title="Redo (Ctrl+Y)">
+          <svg viewBox="0 0 24 24" class="fab-svg" aria-hidden="true">
+            <path d="M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Recent Page Overlay -->
+      <section id="recent-page" class="recent-page hidden" aria-label="Recent">
+        <div class="recent-header">
+          <div id="recent-app-name" class="recent-app-name"></div>
+          <h1 id="recent-title" class="recent-title"></h1>
+        </div>
+        <div class="recent-rule"></div>
+        <div class="recent-body">
+          <div class="recent-actions">
+            <button id="recent-new-btn" class="recent-btn primary" type="button"></button>
+            <button id="recent-open-btn" class="recent-btn" type="button"></button>
+          </div>
+          <div id="recent-list" class="recent-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Shared Modal Dialog -->
+  <div id="modal-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <h2 id="modal-title" class="modal-title"></h2>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-actions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
