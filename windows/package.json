@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build:web": "node scripts/prepare-web.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/hermes-windows.test.mjs",
     "preview": "node scripts/preview-server.mjs",
     "icons": "tauri icon ../app/src/main/res/drawable/hermes_editor_icon.png -o src-tauri/icons",
     "build:windows": "tauri build --bundles nsis"
