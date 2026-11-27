@@ -8,6 +8,9 @@ import {
   markdownToPlainText,
   renderMarkdownPreview,
   renderSourceHighlight,
+  splitMarkdownSegments,
+  serializeTableMarkdown,
+  findAnchorIndex,
 } from '../web/js/markdown.js';
 import { EditorHistory, MAX_HISTORY_STEPS } from '../web/js/history.js';
 import {
@@ -249,3 +252,73 @@ test('findMatches performs case-insensitive search without modifying text', () =
     { start: 16, end: 24 },
   ]);
 });
+
+test('splitMarkdownSegments separates tables and preserves source verbatim including CRLF', () => {
+  const md = [
+    '# Header',
+    '',
+    'Intro text before table.',
+    '',
+    '| Time | Station | Note |',
+    '| :--- | :---: | ---: |',
+    '| 0:00 | **Tap** | pipe \\| here |',
+    '| 0:07 | Vat | Done |',
+    '',
+    '## After Table',
+    '',
+    '| زمان | پرده |',
+    '| --- | --- |',
+    '| 1:00 | شروع |',
+  ].join('\r\n');
+
+  const segs = splitMarkdownSegments(md);
+  assert.equal(segs.map((s) => s.raw).join(''), md);
+
+  const tables = segs.filter((s) => s.type === 'table');
+  assert.equal(tables.length, 2);
+  assert.deepEqual(tables[0].headers, ['Time', 'Station', 'Note']);
+  assert.deepEqual(tables[0].aligns, ['left', 'center', 'right']);
+  assert.deepEqual(tables[0].rows[0], ['0:00', '**Tap**', 'pipe | here']);
+  assert.equal(tables[0].rowOffsets.length, 3);
+  assert.equal(tables[1].headers[0], 'زمان');
+
+  // Round-trip serialization preserves headers, rows, alignment, and escaped pipes
+  const rebuilt = serializeTableMarkdown(tables[0]);
+  const reparsed = splitMarkdownSegments(rebuilt);
+  assert.equal(reparsed.length, 1);
+  assert.equal(reparsed[0].type, 'table');
+  assert.deepEqual(reparsed[0].rows[0], ['0:00', '**Tap**', 'pipe | here']);
+  assert.ok(rebuilt.includes('pipe \\| here'));
+  assert.ok(rebuilt.includes(':--- | :---: | ---:'));
+});
+
+test('renderMarkdownPreview stamps monotonic source offsets on blocks and table rows', () => {
+  const doc = createMockDom();
+  const root = doc.createElement('article');
+  const md = [
+    '# Section 1',
+    '',
+    'Paragraph one.',
+    '',
+    '| Col A | Col B |',
+    '| --- | --- |',
+    '| R1A | R1B |',
+    '| R2A | R2B |',
+    '',
+    '# Section 2',
+  ].join('\n');
+
+  renderMarkdownPreview(md, root, { doc });
+  const stamped = root.findAll((n) => n.dataset?.sourceOffset !== undefined && n.tagName !== 'div');
+  const offsets = stamped.map((n) => Number(n.dataset.sourceOffset));
+  assert.ok(offsets.length >= 6);
+  for (let i = 1; i < offsets.length; i++) {
+    assert.ok(offsets[i] >= offsets[i - 1], `Expected monotonic offsets, got ${offsets}`);
+  }
+  const sec2Offset = md.indexOf('# Section 2');
+  assert.equal(findAnchorIndex(offsets, sec2Offset), offsets.length - 1);
+  const r2Offset = md.indexOf('| R2A |');
+  const r2Idx = findAnchorIndex(offsets, r2Offset);
+  assert.equal(offsets[r2Idx], r2Offset);
+});
+

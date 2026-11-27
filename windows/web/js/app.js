@@ -5,6 +5,9 @@ import {
   markdownToPlainText,
   renderMarkdownPreview,
   renderSourceHighlight,
+  splitMarkdownSegments,
+  serializeTableMarkdown,
+  findAnchorIndex,
 } from './markdown.js';
 import { TabStore, baseName, fileNameFromPath, findMatches } from './state.js';
 import {
@@ -41,6 +44,10 @@ let autosaveTimer = null;
 let toastTimer = null;
 let draggingScrollbar = false;
 
+// Live segmented Edit DOM state for the active tab; cleared on rebuilds.
+let renderedSegments = [];
+const rawTableModes = new Map();
+
 const el = {
   homeBtn: document.getElementById('home-btn'),
   tabStrip: document.getElementById('tab-strip'),
@@ -64,8 +71,6 @@ const el = {
   previewContent: document.getElementById('preview-content'),
   editorScroll: document.getElementById('editor-scroll'),
   editorStage: document.getElementById('editor-stage'),
-  sourceHighlight: document.getElementById('source-highlight'),
-  editorInput: document.getElementById('editor-input'),
   fastScrollbar: document.getElementById('fast-scrollbar'),
   fastScrollbarTrack: document.getElementById('fast-scrollbar-track'),
   fastScrollbarThumb: document.getElementById('fast-scrollbar-thumb'),
@@ -104,6 +109,15 @@ const el = {
 
 function tr(key, ...args) {
   return t(prefs.lang, key, ...args);
+}
+
+function getRawTableSet(tabId) {
+  let set = rawTableModes.get(tabId);
+  if (!set) {
+    set = new Set();
+    rawTableModes.set(tabId, set);
+  }
+  return set;
 }
 
 function showToast(message) {
@@ -164,6 +178,166 @@ function updateScrollbar() {
   const progress = Math.min(1, Math.max(0, scroller.scrollTop / maxScroll));
   el.fastScrollbarThumb.style.height = `${thumbHeight}px`;
   el.fastScrollbarThumb.style.top = `${Math.round(progress * travel)}px`;
+}
+
+function resizeTextarea(textarea) {
+  textarea.style.height = 'auto';
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+function focusFirstEditor() {
+  const firstInput = el.editorStage.querySelector('.editor-input, .table-cell-input');
+  if (firstInput) firstInput.focus();
+}
+
+// --- Viewport Scroll Anchoring between Preview and Edit ---
+
+function getPreviewAnchorElements() {
+  const nodes = [];
+  for (const child of el.previewContent.children) {
+    if (child.classList.contains('md-table-wrap') || child.tagName === 'UL' || child.tagName === 'OL') {
+      const inner = child.querySelectorAll('tr[data-source-offset], li[data-source-offset]');
+      if (inner.length > 0) {
+        nodes.push(...inner);
+        continue;
+      }
+    }
+    if (child.dataset.sourceOffset !== undefined) {
+      nodes.push(child);
+    }
+  }
+  return nodes;
+}
+
+function measureLocalOffsetY(preEl, localOffset) {
+  const text = preEl.textContent || '';
+  if (!text) return preEl.getBoundingClientRect().top;
+
+  let target = Math.max(0, Math.min(localOffset, text.length));
+  if (target === text.length && text.length > 0) target = text.length - 1;
+  while (target < text.length && text[target] === '\n') target++;
+  if (target >= text.length) {
+    target = Math.max(0, localOffset - 1);
+  }
+
+  const walker = document.createTreeWalker(preEl, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  let seen = 0;
+  while (node) {
+    const len = node.nodeValue.length;
+    if (seen + len > target) {
+      const idx = target - seen;
+      const range = document.createRange();
+      const endIdx = Math.min(len, idx + 1);
+      range.setStart(node, idx);
+      range.setEnd(node, endIdx);
+      const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+      if (rect && (rect.height > 0 || rect.top !== 0)) return rect.top;
+    }
+    seen += len;
+    node = walker.nextNode();
+  }
+  return preEl.getBoundingClientRect().top;
+}
+
+function lineStartOffsets(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n' && i + 1 < text.length) starts.push(i + 1);
+  }
+  return starts;
+}
+
+function capturePreviewAnchor() {
+  const containerTop = el.previewScroll.getBoundingClientRect().top;
+  const candidates = getPreviewAnchorElements();
+  for (const node of candidates) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > containerTop + 4) {
+      return {
+        offset: Number(node.dataset.sourceOffset) || 0,
+        delta: Math.max(0, Math.min(rect.top - containerTop, 80)),
+      };
+    }
+  }
+  return { offset: 0, delta: 0 };
+}
+
+function captureEditAnchor() {
+  const containerTop = el.editorScroll.getBoundingClientRect().top;
+  for (const item of renderedSegments) {
+    if (item.seg.type === 'table' && item.rowEls) {
+      for (const rowInfo of item.rowEls) {
+        const rect = rowInfo.tr.getBoundingClientRect();
+        if (rect.bottom > containerTop + 4) {
+          return {
+            offset: rowInfo.offset,
+            delta: Math.max(0, Math.min(rect.top - containerTop, 80)),
+          };
+        }
+      }
+      continue;
+    }
+    if (item.pre && item.seg.raw.length > 0) {
+      const rect = item.pre.getBoundingClientRect();
+      if (rect.bottom <= containerTop + 4) continue;
+      const starts = lineStartOffsets(item.seg.raw);
+      let lo = 0;
+      let hi = starts.length - 1;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const y = measureLocalOffsetY(item.pre, starts[mid]);
+        if (y <= containerTop + 4) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      const lineTop = measureLocalOffsetY(item.pre, starts[best]);
+      return {
+        offset: item.seg.start + starts[best],
+        delta: Math.max(0, Math.min(lineTop - containerTop, 80)),
+      };
+    }
+  }
+  return { offset: 0, delta: 0 };
+}
+
+function scrollToAnchorInPreview(anchor) {
+  const candidates = getPreviewAnchorElements();
+  const offsets = candidates.map((n) => Number(n.dataset.sourceOffset) || 0);
+  const idx = findAnchorIndex(offsets, anchor.offset);
+  if (idx < 0) return;
+  const containerTop = el.previewScroll.getBoundingClientRect().top;
+  const targetTop = candidates[idx].getBoundingClientRect().top;
+  el.previewScroll.scrollTop = Math.max(0, el.previewScroll.scrollTop + (targetTop - containerTop - anchor.delta));
+  if (store.activeTab) store.activeTab.scrollTop = el.previewScroll.scrollTop;
+  updateScrollbar();
+}
+
+function scrollToAnchorInEdit(anchor) {
+  if (renderedSegments.length === 0) return;
+  const segOffsets = renderedSegments.map((item) => item.seg.start);
+  const segIdx = findAnchorIndex(segOffsets, anchor.offset);
+  const chosen = renderedSegments[Math.max(0, segIdx)];
+  const containerTop = el.editorScroll.getBoundingClientRect().top;
+  let targetTop = null;
+
+  if (chosen.seg.type === 'table' && chosen.rowEls?.length) {
+    const rIdx = findAnchorIndex(chosen.rowEls.map((r) => r.offset), anchor.offset);
+    targetTop = chosen.rowEls[Math.max(0, rIdx)].tr.getBoundingClientRect().top;
+  } else if (chosen.pre) {
+    const localOffset = Math.max(0, Math.min(chosen.seg.raw.length, anchor.offset - chosen.seg.start));
+    targetTop = measureLocalOffsetY(chosen.pre, localOffset);
+  }
+
+  if (targetTop !== null) {
+    el.editorScroll.scrollTop = Math.max(0, el.editorScroll.scrollTop + (targetTop - containerTop - anchor.delta));
+    if (store.activeTab) store.activeTab.scrollTop = el.editorScroll.scrollTop;
+    updateScrollbar();
+  }
 }
 
 function applyThemeAndLocale() {
@@ -348,7 +522,369 @@ function getMatchesForActiveTab() {
   return findMatches(tab.text, query);
 }
 
-function renderDocument({ preserveScroll = true } = {}) {
+// Recompute full tab.text after an in-place segment edit without tearing down DOM.
+function syncTextFromSegments(tab, allowCoalescing = true) {
+  let offset = 0;
+  const parts = [];
+  for (let i = 0; i < renderedSegments.length; i++) {
+    const item = renderedSegments[i];
+    const seg = item.seg;
+    let piece = seg.raw;
+    if (seg.placeholderOnly && piece.length > 0) {
+      const nextItem = renderedSegments[i + 1];
+      const prevItem = renderedSegments[i - 1];
+      if (nextItem?.seg.type === 'table' && !piece.endsWith('\n')) {
+        const caretStart = item.textarea ? item.textarea.selectionStart : piece.length;
+        const caretEnd = item.textarea ? item.textarea.selectionEnd : piece.length;
+        piece += '\n\n';
+        seg.raw = piece;
+        if (item.textarea && item.textarea.value !== piece) {
+          item.textarea.value = piece;
+          item.textarea.setSelectionRange(caretStart, caretEnd);
+        }
+        if (item.pre) renderSourceHighlight(piece, item.pre, { markdown: true, trailingSentinel: true });
+      } else if (prevItem?.seg.type === 'table' && !prevItem.seg.trailingNewlines.includes('\n\n')) {
+        const eol = prevItem.seg.eol || '\n';
+        prevItem.seg.trailingNewlines = eol + eol;
+        prevItem.seg.raw = serializeTableMarkdown(prevItem.seg);
+        parts[parts.length - 1] = prevItem.seg.raw;
+      }
+      seg.placeholderOnly = false;
+    }
+    seg.start = offset;
+    offset += piece.length;
+    seg.end = offset;
+    parts.push(piece);
+  }
+
+  const fullText = parts.join('');
+  store.updateText(tab.id, fullText, { allowCoalescing });
+  renderTabs();
+  updateFindBadge();
+  el.btnUndo.disabled = !tab.history.canUndo;
+  el.btnRedo.disabled = !tab.history.canRedo;
+  updateWindowChromeTitle();
+  updateScrollbar();
+  scheduleAutosave();
+}
+
+function updateFindBadge() {
+  if (!finding) return;
+  const matches = getMatchesForActiveTab();
+  if (matches.length > 0 && matchIndex >= matches.length) matchIndex = matches.length - 1;
+  el.findCount.textContent = matches.length > 0
+    ? tr('match_count', matchIndex + 1, matches.length)
+    : (query ? tr('no_matches') : '');
+}
+
+function createProseSegmentDom(tab, seg, rawIndex, onlySegment, activeMatch, isMd) {
+  const dir = tab.rtl ? 'rtl' : 'ltr';
+  const align = tab.rtl ? 'right' : 'left';
+  const wrap = document.createElement('div');
+  wrap.className = `prose-segment${onlySegment ? ' only-segment' : ''}`;
+
+  if (rawIndex !== null) {
+    const bar = document.createElement('div');
+    bar.className = 'md-edit-table-bar';
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'table-tool-btn';
+    backBtn.textContent = tr('table_grid');
+    backBtn.addEventListener('click', () => {
+      getRawTableSet(tab.id).delete(rawIndex);
+      renderDocument({ preserveScroll: true });
+    });
+    bar.appendChild(backBtn);
+    wrap.appendChild(bar);
+  }
+
+  const stage = document.createElement('div');
+  stage.className = 'prose-segment';
+
+  const pre = document.createElement('pre');
+  pre.className = 'source-highlight';
+  pre.setAttribute('aria-hidden', 'true');
+  pre.setAttribute('dir', dir);
+  pre.style.textAlign = align;
+
+  const ta = document.createElement('textarea');
+  ta.className = 'editor-input';
+  ta.spellcheck = false;
+  ta.autocomplete = 'off';
+  ta.autocapitalize = 'off';
+  ta.setAttribute('wrap', 'soft');
+  ta.setAttribute('dir', dir);
+  ta.style.textAlign = align;
+  if (onlySegment) ta.placeholder = tr('hint');
+  ta.value = seg.raw;
+
+  const localMatch =
+    activeMatch && activeMatch.end > seg.start && activeMatch.start < seg.end
+      ? {
+          start: Math.max(0, activeMatch.start - seg.start),
+          end: Math.min(seg.raw.length, activeMatch.end - seg.start),
+        }
+      : null;
+
+  renderSourceHighlight(seg.raw, pre, {
+    markdown: isMd,
+    activeMatch: localMatch,
+    trailingSentinel: true,
+  });
+
+  const item = { seg, pre, textarea: ta, root: wrap };
+
+  ta.addEventListener('paste', () => {
+    tab.history.breakCoalescing();
+  });
+
+  ta.addEventListener('input', () => {
+    seg.raw = ta.value;
+    renderSourceHighlight(seg.raw, pre, {
+      markdown: isMd,
+      activeMatch: null,
+      trailingSentinel: true,
+    });
+    syncTextFromSegments(tab, true);
+  });
+
+  stage.append(pre, ta);
+  wrap.appendChild(stage);
+  return { root: wrap, item };
+}
+
+function createTableSegmentDom(tab, seg, segIndex, activeMatch) {
+  const dir = tab.rtl ? 'rtl' : 'ltr';
+  const wrap = document.createElement('div');
+  wrap.className = 'md-edit-table-wrap';
+  wrap.setAttribute('dir', dir);
+
+  const bar = document.createElement('div');
+  bar.className = 'md-edit-table-bar';
+
+  const addRowBtn = document.createElement('button');
+  addRowBtn.type = 'button';
+  addRowBtn.className = 'table-tool-btn';
+  addRowBtn.textContent = tr('table_add_row');
+
+  const delRowBtn = document.createElement('button');
+  delRowBtn.type = 'button';
+  delRowBtn.className = 'table-tool-btn';
+  delRowBtn.textContent = tr('table_del_row');
+  delRowBtn.disabled = seg.rows.length === 0;
+
+  const addColBtn = document.createElement('button');
+  addColBtn.type = 'button';
+  addColBtn.className = 'table-tool-btn';
+  addColBtn.textContent = tr('table_add_col');
+
+  const delColBtn = document.createElement('button');
+  delColBtn.type = 'button';
+  delColBtn.className = 'table-tool-btn';
+  delColBtn.textContent = tr('table_del_col');
+  delColBtn.disabled = seg.headers.length <= 1;
+
+  const rawBtn = document.createElement('button');
+  rawBtn.type = 'button';
+  rawBtn.className = 'table-tool-btn';
+  rawBtn.textContent = tr('table_raw');
+
+  bar.append(addRowBtn, delRowBtn, addColBtn, delColBtn, rawBtn);
+  wrap.appendChild(bar);
+
+  const scroller = document.createElement('div');
+  scroller.className = 'md-edit-table-scroll';
+  const table = document.createElement('table');
+  table.className = 'md-table md-edit-table';
+
+  const rowEls = [];
+  const cellGrid = [];
+  const needle = finding && query ? query.toLowerCase() : '';
+  const matchInTable = Boolean(activeMatch && activeMatch.end > seg.start && activeMatch.start < seg.end);
+  let markedActiveCell = false;
+
+  const makeCellInput = (value, rowIdx, colIdx, isHeader) => {
+    const ta = document.createElement('textarea');
+    ta.rows = 1;
+    ta.className = 'table-cell-input';
+    ta.spellcheck = false;
+    ta.value = value;
+    if (needle && String(value).toLowerCase().includes(needle)) {
+      ta.classList.add('table-cell-match');
+      if (matchInTable && !markedActiveCell) {
+        ta.dataset.activeMatch = '1';
+        markedActiveCell = true;
+      }
+    }
+
+    ta.addEventListener('paste', () => {
+      tab.history.breakCoalescing();
+    });
+
+    ta.addEventListener('input', () => {
+      resizeTextarea(ta);
+      if (isHeader) seg.headers[colIdx] = ta.value;
+      else seg.rows[rowIdx][colIdx] = ta.value;
+      seg.raw = serializeTableMarkdown(seg);
+      syncTextFromSegments(tab, true);
+    });
+
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const flatRow = isHeader ? 0 : rowIdx + 1;
+        const nextRow = cellGrid[flatRow + 1];
+        if (nextRow?.[colIdx]) {
+          nextRow[colIdx].focus();
+        } else {
+          // Last row Enter adds a new row and focuses the same column
+          addRow(colIdx);
+        }
+      }
+    });
+
+    return ta;
+  };
+
+  const thead = document.createElement('thead');
+  const headTr = document.createElement('tr');
+  const headCells = [];
+  seg.headers.forEach((cellVal, colIdx) => {
+    const th = document.createElement('th');
+    const align = seg.aligns[colIdx];
+    if (align) th.style.textAlign = align;
+    const input = makeCellInput(cellVal, -1, colIdx, true);
+    headCells.push(input);
+    th.appendChild(input);
+    headTr.appendChild(th);
+  });
+  cellGrid.push(headCells);
+  rowEls.push({ tr: headTr, offset: seg.rowOffsets?.[0] ?? seg.start });
+  thead.appendChild(headTr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  seg.rows.forEach((rowVals, rowIdx) => {
+    const tr = document.createElement('tr');
+    const rowCells = [];
+    seg.headers.forEach((_, colIdx) => {
+      const td = document.createElement('td');
+      const align = seg.aligns[colIdx];
+      if (align) td.style.textAlign = align;
+      const input = makeCellInput(rowVals[colIdx] ?? '', rowIdx, colIdx, false);
+      rowCells.push(input);
+      td.appendChild(input);
+      tr.appendChild(td);
+    });
+    cellGrid.push(rowCells);
+    rowEls.push({ tr, offset: seg.rowOffsets?.[1 + rowIdx] ?? seg.start });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scroller.appendChild(table);
+  wrap.appendChild(scroller);
+
+  const commitStructure = (focusTarget) => {
+    tab.history.breakCoalescing();
+    seg.raw = serializeTableMarkdown(seg);
+    syncTextFromSegments(tab, false);
+    const savedScroll = el.editorScroll.scrollTop;
+    renderDocument({ preserveScroll: false });
+    el.editorScroll.scrollTop = savedScroll;
+    if (focusTarget) {
+      const tables = el.editorStage.querySelectorAll('.md-edit-table');
+      const targetTable = tables[focusTarget.tableOrder];
+      const cell = targetTable?.querySelectorAll('tr')?.[focusTarget.flatRow]?.querySelectorAll('.table-cell-input')?.[focusTarget.col];
+      cell?.focus();
+    }
+  };
+
+  const tableOrderIndex = () => {
+    let order = 0;
+    for (let i = 0; i < renderedSegments.length; i++) {
+      if (renderedSegments[i].seg === seg) return order;
+      if (renderedSegments[i].seg.type === 'table' && renderedSegments[i].rowEls) order++;
+    }
+    return 0;
+  };
+
+  function addRow(focusCol = 0) {
+    const order = tableOrderIndex();
+    seg.rows.push(Array(seg.headers.length).fill(''));
+    commitStructure({ tableOrder: order, flatRow: seg.rows.length, col: focusCol });
+  }
+
+  addRowBtn.addEventListener('click', () => addRow(0));
+  delRowBtn.addEventListener('click', () => {
+    if (seg.rows.length === 0) return;
+    seg.rows.pop();
+    commitStructure(null);
+  });
+  addColBtn.addEventListener('click', () => {
+    const order = tableOrderIndex();
+    const newCol = seg.headers.length;
+    seg.headers.push(`Column ${newCol + 1}`);
+    seg.aligns.push(null);
+    seg.rows.forEach((r) => r.push(''));
+    commitStructure({ tableOrder: order, flatRow: 0, col: newCol });
+  });
+  delColBtn.addEventListener('click', () => {
+    if (seg.headers.length <= 1) return;
+    seg.headers.pop();
+    seg.aligns.pop();
+    seg.rows.forEach((r) => r.pop());
+    commitStructure(null);
+  });
+  rawBtn.addEventListener('click', () => {
+    getRawTableSet(tab.id).add(segIndex);
+    renderDocument({ preserveScroll: true });
+  });
+
+  return { root: wrap, item: { seg, rowEls, root: wrap } };
+}
+
+function renderEditorSegments(tab, activeMatch) {
+  const isMd = isMarkdownName(tab.title);
+  const rawSet = getRawTableSet(tab.id);
+  el.editorStage.replaceChildren();
+  renderedSegments = [];
+
+  let segments = isMd
+    ? splitMarkdownSegments(tab.text)
+    : [{ type: 'text', start: 0, end: tab.text.length, raw: tab.text }];
+
+  if (segments.length === 0) {
+    segments = [{ type: 'text', start: 0, end: 0, raw: '' }];
+  } else if (isMd) {
+    if (segments[0].type === 'table') {
+      segments.unshift({ type: 'text', start: 0, end: 0, raw: '', placeholderOnly: true });
+    }
+    const last = segments[segments.length - 1];
+    if (last.type === 'table') {
+      segments.push({ type: 'text', start: last.end, end: last.end, raw: '', placeholderOnly: true });
+    }
+  }
+
+  const onlySegment = segments.length === 1 && segments[0].type === 'text';
+
+  segments.forEach((seg, segIndex) => {
+    if (seg.type === 'table' && !rawSet.has(segIndex)) {
+      const built = createTableSegmentDom(tab, seg, segIndex, activeMatch);
+      renderedSegments.push(built.item);
+      el.editorStage.appendChild(built.root);
+    } else {
+      const rawToggleIndex = seg.type === 'table' ? segIndex : null;
+      const built = createProseSegmentDom(tab, seg, rawToggleIndex, onlySegment, activeMatch, isMd);
+      renderedSegments.push(built.item);
+      el.editorStage.appendChild(built.root);
+    }
+  });
+
+  // Resize table cell inputs after attachment so scrollHeight measures accurately.
+  el.editorStage.querySelectorAll('.table-cell-input').forEach(resizeTextarea);
+}
+
+function renderDocument({ preserveScroll = true, scrollAnchor = null } = {}) {
   const tab = store.activeTab;
   const showingDoc = Boolean(tab) && !store.home;
 
@@ -374,7 +910,6 @@ function renderDocument({ preserveScroll = true } = {}) {
   el.floatingActions.classList.toggle('hidden', finding || previewing);
 
   const dir = tab.rtl ? 'rtl' : 'ltr';
-  const align = tab.rtl ? 'right' : 'left';
 
   if (previewing) {
     el.editorScroll.classList.add('hidden');
@@ -384,7 +919,9 @@ function renderDocument({ preserveScroll = true } = {}) {
       onLinkClick: (url) => openExternalUrl(url),
       emptyText: tr('preview_empty'),
     });
-    if (preserveScroll) {
+    if (scrollAnchor) {
+      requestAnimationFrame(() => scrollToAnchorInPreview(scrollAnchor));
+    } else if (preserveScroll) {
       requestAnimationFrame(() => {
         el.previewScroll.scrollTop = tab.scrollTop || 0;
         updateScrollbar();
@@ -393,36 +930,20 @@ function renderDocument({ preserveScroll = true } = {}) {
   } else {
     el.previewScroll.classList.add('hidden');
     el.editorScroll.classList.remove('hidden');
-    el.editorInput.setAttribute('dir', dir);
-    el.editorInput.style.textAlign = align;
-    el.sourceHighlight.setAttribute('dir', dir);
-    el.sourceHighlight.style.textAlign = align;
-    el.editorInput.placeholder = tr('hint');
-
-    if (el.editorInput.value !== tab.text) {
-      el.editorInput.value = tab.text;
-    }
 
     const matches = getMatchesForActiveTab();
     if (matches.length > 0 && matchIndex >= matches.length) matchIndex = matches.length - 1;
     const activeMatch = matches[matchIndex] || null;
 
-    renderSourceHighlight(tab.text, el.sourceHighlight, {
-      markdown: isMd,
-      activeMatch,
-      trailingSentinel: true,
-    });
-
-    if (finding) {
-      el.findCount.textContent = matches.length > 0
-        ? tr('match_count', matchIndex + 1, matches.length)
-        : (query ? tr('no_matches') : '');
-    }
+    renderEditorSegments(tab, activeMatch);
+    updateFindBadge();
 
     el.btnUndo.disabled = !tab.history.canUndo;
     el.btnRedo.disabled = !tab.history.canRedo;
 
-    if (preserveScroll) {
+    if (scrollAnchor) {
+      requestAnimationFrame(() => scrollToAnchorInEdit(scrollAnchor));
+    } else if (preserveScroll) {
       requestAnimationFrame(() => {
         el.editorScroll.scrollTop = tab.scrollTop || 0;
         updateScrollbar();
@@ -431,6 +952,17 @@ function renderDocument({ preserveScroll = true } = {}) {
   }
 
   requestAnimationFrame(updateScrollbar);
+}
+
+function togglePreviewMode() {
+  const tab = store.activeTab;
+  if (!tab || store.home || !isMarkdownName(tab.title)) return;
+  const anchor = tab.mdPreview ? capturePreviewAnchor() : captureEditAnchor();
+  saveActiveScroll();
+  store.togglePreview(tab.id);
+  if (tab.mdPreview) finding = false;
+  renderAll({ preserveScroll: false, scrollAnchor: anchor });
+  scheduleAutosave();
 }
 
 function renderLabels() {
@@ -487,12 +1019,12 @@ function maybeSuggestDirection(tab) {
   });
 }
 
-function renderAll({ preserveScroll = true } = {}) {
+function renderAll({ preserveScroll = true, scrollAnchor = null } = {}) {
   applyThemeAndLocale();
   renderLabels();
   renderTabs();
   renderRecent();
-  renderDocument({ preserveScroll });
+  renderDocument({ preserveScroll, scrollAnchor });
   updateWindowChromeTitle();
 }
 
@@ -506,7 +1038,7 @@ function handleNewFile(markdown = false) {
   }
   finding = false;
   renderAll();
-  el.editorInput.focus();
+  focusFirstEditor();
   scheduleAutosave();
 }
 
@@ -663,10 +1195,14 @@ async function handleExportPlainText() {
 function requestCloseTab(tabId) {
   const tab = store.tabs.find((t) => t.id === tabId);
   if (!tab) return;
-  if (!tab.dirty) {
+  const finishClose = () => {
+    rawTableModes.delete(tabId);
     store.closeTab(tabId);
     renderAll();
     scheduleAutosave();
+  };
+  if (!tab.dirty) {
+    finishClose();
     return;
   }
   showModal({
@@ -674,14 +1210,7 @@ function requestCloseTab(tabId) {
     bodyText: tr('discard_open'),
     buttons: [
       { label: tr('cancel') },
-      {
-        label: tr('discard'),
-        onClick: () => {
-          store.closeTab(tabId);
-          renderAll();
-          scheduleAutosave();
-        },
-      },
+      { label: tr('discard'), onClick: finishClose },
     ],
   });
 }
@@ -692,7 +1221,7 @@ function handleUndo() {
   const prev = store.undo(tab.id);
   if (prev === null) return;
   renderTabs();
-  renderDocument({ preserveScroll: false });
+  renderDocument({ preserveScroll: true });
   updateWindowChromeTitle();
   scheduleAutosave();
 }
@@ -703,7 +1232,7 @@ function handleRedo() {
   const next = store.redo(tab.id);
   if (next === null) return;
   renderTabs();
-  renderDocument({ preserveScroll: false });
+  renderDocument({ preserveScroll: true });
   updateWindowChromeTitle();
   scheduleAutosave();
 }
@@ -713,7 +1242,7 @@ function scrollToActiveMatch() {
   const match = matches[matchIndex];
   if (!match) return;
   requestAnimationFrame(() => {
-    const marker = el.sourceHighlight.querySelector('[data-active-match="1"]');
+    const marker = el.editorStage.querySelector('[data-active-match="1"]');
     if (marker) {
       marker.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
@@ -724,11 +1253,13 @@ function openFind() {
   closeAllMenus();
   const tab = store.activeTab;
   if (!tab || store.home) return;
+  let anchor = null;
   if (isMarkdownName(tab.title) && tab.mdPreview) {
+    anchor = capturePreviewAnchor();
     store.togglePreview(tab.id);
   }
   finding = true;
-  renderDocument({ preserveScroll: false });
+  renderAll({ preserveScroll: false, scrollAnchor: anchor });
   el.findInput.focus();
   el.findInput.select();
 }
@@ -738,14 +1269,14 @@ function closeFind() {
   query = '';
   matchIndex = 0;
   el.findInput.value = '';
-  renderDocument({ preserveScroll: false });
+  renderDocument({ preserveScroll: true });
 }
 
 function applyFontSize(next) {
   const clamped = Math.max(MIN_FONT, Math.min(MAX_FONT, Math.round(next)));
   if (clamped === prefs.fontSize) return;
   prefs.fontSize = clamped;
-  renderAll({ preserveScroll: false });
+  renderAll({ preserveScroll: true });
   scheduleAutosave();
 }
 
@@ -763,7 +1294,7 @@ function openDirectionDialog() {
     btn.addEventListener('click', () => {
       closeModal();
       store.setDirection(tab.id, rtl);
-      renderDocument({ preserveScroll: false });
+      renderDocument({ preserveScroll: true });
       scheduleAutosave();
     });
     node.appendChild(btn);
@@ -823,13 +1354,7 @@ function setupEvents() {
 
   el.modePill.addEventListener('click', () => {
     closeAllMenus();
-    saveActiveScroll();
-    const tab = store.activeTab;
-    if (!tab) return;
-    store.togglePreview(tab.id);
-    if (tab.mdPreview) finding = false;
-    renderAll({ preserveScroll: false });
-    scheduleAutosave();
+    togglePreviewMode();
   });
 
   el.moreBtn.addEventListener('click', (e) => {
@@ -849,23 +1374,18 @@ function setupEvents() {
     if (action === 'theme') {
       prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';
       closeAllMenus();
-      renderAll({ preserveScroll: false });
+      renderAll({ preserveScroll: true });
       scheduleAutosave();
     } else if (action === 'lang') {
       prefs.lang = prefs.lang === 'fa' ? 'en' : 'fa';
       closeAllMenus();
-      renderAll({ preserveScroll: false });
+      renderAll({ preserveScroll: true });
       scheduleAutosave();
     } else if (action === 'direction') {
       openDirectionDialog();
     } else if (action === 'toggle-preview') {
       closeAllMenus();
-      saveActiveScroll();
-      const tab = store.activeTab;
-      if (tab) store.togglePreview(tab.id);
-      if (tab?.mdPreview) finding = false;
-      renderAll({ preserveScroll: false });
-      scheduleAutosave();
+      togglePreviewMode();
     } else if (action === 'find') {
       openFind();
     } else if (action === 'discard') {
@@ -878,6 +1398,7 @@ function setupEvents() {
           {
             label: tr('discard'),
             onClick: () => {
+              if (store.activeTab) rawTableModes.delete(store.activeTab.id);
               store.discardActiveTab();
               renderAll({ preserveScroll: false });
               scheduleAutosave();
@@ -901,24 +1422,11 @@ function setupEvents() {
     applyFontSize(prefs.fontSize + 1);
   });
 
-  el.editorInput.addEventListener('paste', () => {
-    store.activeTab?.history.breakCoalescing();
-  });
-
-  el.editorInput.addEventListener('input', () => {
-    const tab = store.activeTab;
-    if (!tab) return;
-    store.updateText(tab.id, el.editorInput.value);
-    if (finding && query) matchIndex = 0;
-    renderTabs();
-    renderDocument({ preserveScroll: false });
-    updateWindowChromeTitle();
-    updateScrollbar();
-    scheduleAutosave();
-  });
-
   el.editorScroll.addEventListener('click', (e) => {
-    if (e.target === el.editorScroll) el.editorInput.focus();
+    if (e.target === el.editorScroll || e.target === el.editorStage) {
+      const inputs = el.editorStage.querySelectorAll('.editor-input');
+      if (inputs.length > 0) inputs[inputs.length - 1].focus();
+    }
   });
 
   el.editorScroll.addEventListener('scroll', () => {
@@ -1026,21 +1534,21 @@ function setupEvents() {
   el.findInput.addEventListener('input', () => {
     query = el.findInput.value;
     matchIndex = 0;
-    renderDocument({ preserveScroll: false });
+    renderDocument({ preserveScroll: true });
     scrollToActiveMatch();
   });
   el.findPrevBtn.addEventListener('click', () => {
     const matches = getMatchesForActiveTab();
     if (matches.length === 0) return;
     matchIndex = (matchIndex - 1 + matches.length) % matches.length;
-    renderDocument({ preserveScroll: false });
+    renderDocument({ preserveScroll: true });
     scrollToActiveMatch();
   });
   el.findNextBtn.addEventListener('click', () => {
     const matches = getMatchesForActiveTab();
     if (matches.length === 0) return;
     matchIndex = (matchIndex + 1) % matches.length;
-    renderDocument({ preserveScroll: false });
+    renderDocument({ preserveScroll: true });
     scrollToActiveMatch();
   });
   el.findCloseBtn.addEventListener('click', closeFind);
@@ -1083,14 +1591,7 @@ function setupEvents() {
       handleSave({ forceSaveAs: e.shiftKey });
     } else if (key === 'e') {
       e.preventDefault();
-      const tab = store.activeTab;
-      if (tab && !store.home && isMarkdownName(tab.title)) {
-        saveActiveScroll();
-        store.togglePreview(tab.id);
-        if (tab.mdPreview) finding = false;
-        renderAll({ preserveScroll: false });
-        scheduleAutosave();
-      }
+      togglePreviewMode();
     } else if (key === 'w') {
       e.preventDefault();
       if (store.activeTab && !store.home) requestCloseTab(store.activeTab.id);
@@ -1125,7 +1626,10 @@ function setupEvents() {
     }
   });
 
-  window.addEventListener('resize', updateScrollbar);
+  window.addEventListener('resize', () => {
+    el.editorStage.querySelectorAll('.table-cell-input').forEach(resizeTextarea);
+    updateScrollbar();
+  });
 }
 
 async function init() {

@@ -368,12 +368,18 @@ html[dir="rtl"] .doc-scroll {
   max-width: 960px;
   margin: 0 auto;
   min-height: calc(100% - 20px);
+  padding-bottom: 140px;
+}
+
+.prose-segment {
+  position: relative;
+  width: 100%;
 }
 
 .source-highlight,
 .editor-input {
   margin: 0;
-  padding: 4px 2px 140px;
+  padding: 4px 2px;
   width: 100%;
   font-family: var(--doc-font);
   font-size: var(--doc-font-size);
@@ -392,10 +398,14 @@ html[dir="rtl"] .doc-scroll {
 
 .source-highlight {
   position: relative;
-  min-height: 360px;
+  min-height: 28px;
   color: var(--on-bg);
   pointer-events: none;
   user-select: none;
+}
+
+.prose-segment.only-segment .source-highlight {
+  min-height: 360px;
 }
 
 .editor-input {
@@ -407,6 +417,89 @@ html[dir="rtl"] .doc-scroll {
   background: transparent;
   color: transparent;
   caret-color: var(--primary);
+}
+
+/* Editable GFM Table inside Edit Mode */
+.md-edit-table-wrap {
+  width: 100%;
+  margin: 10px 0 14px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.md-edit-table-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--outline);
+}
+
+.table-tool-btn {
+  border: 1px solid var(--outline);
+  background: var(--surface-variant);
+  color: var(--on-surface);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-family: var(--ui-font);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.table-tool-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.table-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.md-edit-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.md-edit-table th,
+.md-edit-table td {
+  padding: 0;
+}
+
+.table-cell-input {
+  display: block;
+  width: 100%;
+  min-width: 72px;
+  margin: 0;
+  padding: 8px 11px;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--on-bg);
+  font-family: var(--doc-font);
+  font-size: calc(var(--doc-font-size) * 0.94);
+  line-height: 1.5;
+  font-weight: inherit;
+  text-align: inherit;
+  box-sizing: border-box;
+}
+
+.md-edit-table thead .table-cell-input {
+  font-weight: 700;
+}
+
+.table-cell-input:focus {
+  background: var(--primary-soft);
+}
+
+.table-cell-input.table-cell-match {
+  background: var(--match-bg);
 }
 
 .editor-input::placeholder {
